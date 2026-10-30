@@ -67,6 +67,78 @@ await build({
               "const soulPath = path.resolve(process.cwd(), 'configs', 'SOUL.md');",
               "const soulPath = [process.env.SYNAPSE_PROFILE, process.env.SYNAPSE_HOME].filter(Boolean).map(dir => path.join(dir!, 'SOUL.md')).find(file => fs.existsSync(file)) || path.resolve(process.cwd(), 'configs', 'SOUL.md');",
             );
+          if (file.endsWith(path.join("hermes", "index.ts"))) {
+            const replace = (from, to) => {
+              if (!contents.includes(from))
+                throw new Error(
+                  `Upstream session adapter anchor missing: ${from}`,
+                );
+              contents = contents.replaceAll(from, to);
+            };
+            replace(
+              "`group_${route.groupId}_user_${route.userId}`",
+              "`group_${route.groupId}`",
+            );
+            replace(
+              "const hermesSessionId = sessionVersion > 0 ? `${hermesSessionBase}:v${sessionVersion}` : hermesSessionBase;",
+              "const hermesSessionId = hermesSessionBase;",
+            );
+            replace(
+              "private clearSession(route: RouteInfo): number {",
+              "private async clearSession(route: RouteInfo): Promise<number> {\n    await this.hermes.resetSession(route.type === 'user' ? `user_${route.userId}` : `group_${route.groupId}`);",
+            );
+            replace(
+              "const newVersion = this.clearSession(route);",
+              "const newVersion = await this.clearSession(route);",
+            );
+            // Serialize preparation/submission too, so slow image downloads cannot
+            // overtake earlier messages. Native execution is queued in the host.
+            replace(
+              "private readonly sessions = new Map<string, Session>();",
+              `private readonly sessions = new Map<string, Session>();
+  private readonly synapseIngress = new Map<string, Promise<void>>();
+  private queueSynapse(route: RouteInfo, work: () => Promise<void>): Promise<void> {
+    const key = this.getSessionKey(route);
+    const task = (this.synapseIngress.get(key) || Promise.resolve()).then(work);
+    const tail = task.catch(() => {}).finally(() => { if (this.synapseIngress.get(key) === tail) this.synapseIngress.delete(key); });
+    this.synapseIngress.set(key, tail);
+    return task;
+  }
+  private synapseControl(route: RouteInfo, text: string): boolean {
+    return isStopCommand(text) || (Boolean(parseApprovalChoice(text)) && this.isRouteAdmin(route) && [...this.pendingApprovals.values()].some(a => this.routeMatches(route, a.route)));
+  }`,
+            );
+            replace(
+              "private async handleMessageSafe(bot: QQBot, msg: GroupMessageWSMSG | PrivateMessageWSMSG): Promise<void>",
+              "private async handleMessageSafe(bot: QQBot, msg: GroupMessageWSMSG | PrivateMessageWSMSG, synapseQueued = false): Promise<void>",
+            );
+            replace(
+              "const rawText = this.extractText(msg.message);",
+              "const rawText = this.extractText(msg.message);\n    if (!synapseQueued && !this.synapseControl(route, rawText)) return this.queueSynapse(route, () => this.handleMessageSafe(bot, msg, true));",
+            );
+            replace(
+              "private async handleDiscordMessageSafe(bot: QQBot, message: DiscordMessage, params: DiscordChatParams): Promise<void>",
+              "private async handleDiscordMessageSafe(bot: QQBot, message: DiscordMessage, params: DiscordChatParams, synapseQueued = false): Promise<void>",
+            );
+            replace(
+              "const rawText = this.plainDiscordText(message, params.botUserId);",
+              "const rawText = this.plainDiscordText(message, params.botUserId);\n    if (!synapseQueued && !this.synapseControl(route, rawText)) return this.queueSynapse(route, () => this.handleDiscordMessageSafe(bot, message, params, true));",
+            );
+          }
+          if (file.endsWith(path.join("hermes", "client.ts"))) {
+            const anchor = "export class HermesClient {";
+            if (!contents.includes(anchor))
+              throw new Error("Upstream Hermes client anchor missing");
+            contents = contents.replace(
+              anchor,
+              `${anchor}
+  public async resetSession(sessionId: string): Promise<void> {
+    const response = await fetch(this.baseUrl + '/v1/sessions/reset', { method: 'POST', headers: this.headers(), body: JSON.stringify({ session_id: sessionId }) });
+    if (!response.ok) throw new Error('DSH 会话重置失败: ' + response.status);
+  }
+`,
+            );
+          }
           return { contents, loader: "ts" };
         });
       },

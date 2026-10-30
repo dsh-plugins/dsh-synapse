@@ -9,7 +9,9 @@ import { promptFor } from "./files.js";
 import { createHash } from "node:crypto";
 import { Harness, type AskApproval } from "./harness.js";
 import type { HostAPI } from "@dsh-plugin/dsh-loader";
+import { SessionQueue } from "./session-queue.js";
 export class Agent {
+  private queue = new SessionQueue();
   harness: Harness;
   config: ConfigSource;
   paths: PluginPaths;
@@ -54,29 +56,46 @@ export class Agent {
     onEvent: AgentEvent = () => {},
     channelInstructions = "",
     ask?: AskApproval,
+    sessionKey?: string,
   ) {
-    const system =
-      (await this.context(input, channel)) +
-      (channelInstructions ? "\n\n通道适配规则：\n" + channelInstructions : "");
-    const tools = channel === "chat" ? await this.mcp.available() : [];
-    const output = await this.harness.run(
-      system,
-      input,
-      history,
-      tools,
+    if (!sessionKey?.startsWith(`${channel}:`))
+      throw new Error("任务必须绑定对应通道的会话");
+    return this.queue.run(
+      sessionKey,
+      async (queuedSignal) => {
+        onEvent("run.started", { session: sessionKey });
+        const system =
+          (await this.context(input, channel)) +
+          (channelInstructions
+            ? "\n\n通道适配规则：\n" + channelInstructions
+            : "");
+        const tools = channel === "chat" ? await this.mcp.available() : [];
+        const output = await this.harness.run(
+          system,
+          input,
+          history,
+          tools,
+          queuedSignal,
+          onEvent,
+          ask,
+          sessionKey,
+        );
+        await this.learn(
+          typeof input === "string" ? input : JSON.stringify(input),
+          output,
+          channel,
+          queuedSignal,
+        ).catch(this.onError);
+        return output;
+      },
       signal,
-      onEvent,
-      ask,
     );
-    await this.learn(
-      typeof input === "string" ? input : JSON.stringify(input),
-      output,
-      channel,
-      signal,
-    ).catch(this.onError);
-    return output;
+  }
+  reset(sessionKey: string) {
+    return this.queue.reset(sessionKey, () => this.harness.reset(sessionKey));
   }
   async close() {
+    await this.queue.close();
     await this.harness.close();
   }
   async learn(input, output, channel, signal?: AbortSignal) {

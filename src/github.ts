@@ -35,6 +35,7 @@ export class Reviews {
   closed: boolean;
   controller: AbortController;
   running: Promise<void>;
+  private workers = new Map<string, Promise<void>>();
 
   constructor(
     db: import("better-sqlite3").Database,
@@ -139,37 +140,58 @@ export class Reviews {
     if (this.closed || this.running) return this.running;
     this.running = this.work().finally(() => {
       this.running = null;
+      if (
+        !this.closed &&
+        this.config().githubEnabled &&
+        this.db
+          .prepare("SELECT 1 FROM deliveries WHERE state='pending' LIMIT 1")
+          .get()
+      )
+        void this.drain();
     });
     return this.running;
   }
   async work() {
     while (!this.closed && this.config().githubEnabled) {
-      const job = this.db
+      const pending = this.db
         .prepare(
-          "SELECT * FROM deliveries WHERE state='pending' ORDER BY rowid LIMIT 1",
+          "SELECT * FROM deliveries WHERE state='pending' ORDER BY rowid",
         )
-        .get() as Delivery;
-      if (!job) return;
+        .all() as Delivery[];
+      for (const job of pending) {
+        if (this.workers.size >= 4) break;
+        const repo = String(
+          JSON.parse(job.payload).repository?.full_name,
+        ).toLowerCase();
+        if (this.workers.has(repo)) continue;
+        this.db
+          .prepare(
+            "UPDATE deliveries SET state='running',attempts=attempts+1,updated=CURRENT_TIMESTAMP WHERE id=?",
+          )
+          .run(job.id);
+        const task = this.process(job).finally(() => this.workers.delete(repo));
+        this.workers.set(repo, task);
+      }
+      if (!this.workers.size) return;
+      await Promise.race(this.workers.values());
+    }
+    await Promise.all(this.workers.values());
+  }
+  private async process(job: Delivery) {
+    try {
+      const result = await this.review(job);
       this.db
         .prepare(
-          "UPDATE deliveries SET state='running',attempts=attempts+1,updated=CURRENT_TIMESTAMP WHERE id=?",
+          "UPDATE deliveries SET state='complete',result=?,error=NULL,updated=CURRENT_TIMESTAMP WHERE id=?",
         )
-        .run(job.id);
-      try {
-        const result = await this.review(job);
-        this.db
-          .prepare(
-            "UPDATE deliveries SET state='complete',result=?,error=NULL,updated=CURRENT_TIMESTAMP WHERE id=?",
-          )
-          .run(JSON.stringify(result), job.id);
-      } catch (e) {
-        this.db
-          .prepare(
-            "UPDATE deliveries SET state='failed',error=?,updated=CURRENT_TIMESTAMP WHERE id=?",
-          )
-          .run(e.message, job.id);
-        this.onError(e);
-      }
+        .run(JSON.stringify(result), job.id);
+    } catch (e) {
+      this.db
+        .prepare(
+          "UPDATE deliveries SET state=?,error=?,updated=CURRENT_TIMESTAMP WHERE id=?",
+        )
+        .run(this.closed ? "pending" : "failed", e.message, job.id);
+      if (!this.closed) this.onError(e);
     }
   }
   async review(job) {
@@ -238,6 +260,10 @@ export class Reviews {
       "review",
       [],
       this.controller.signal,
+      undefined,
+      "",
+      undefined,
+      `review:github:${repo.toLowerCase()}`,
     );
     if (c.publishReviews) {
       if (isPR) {

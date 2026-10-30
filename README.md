@@ -43,7 +43,11 @@ QQ 需在「命令入口」「QQ / Discord 消息行为」等功能下添加启�
 
 Discord Bot 需要 Message Content Intent；斜杠命令需要 `applications.commands`。桥接群使用上游共享会话逻辑，QQ/Discord 使用同一聊天长期记忆库。OneBot 私聊/群聊和 Discord 的门控、管理员身份仍由上游执行。
 
-Synapse 为每次任务创建受宿主管理的 Agent，继承 DSH 的当前 provider、model 和推理设置，并注入对应提示词、记忆和 Skill。工具调用、策略检查、取消和会话生命周期由 DSH 执行。上游 Hermes 的消息协议仅在本机适配层使用；插件不提供额外的模型 API 或外部 harness 配置。升级前仅配置了插件独立模型的用户，需要在 DSH 的模型设置中选择默认模型。
+Synapse 按会话绑定长期驻留的 DSH Agent：每个 QQ 群与其桥接的 Discord 频道共用一个会话，私聊按 QQ 用户绑定，GitHub 审查按仓库绑定。群内不同发言人进入同一会话，消息保留发言人标识。每次执行读取 DSH 当前默认模型，并更新提示词、记忆与 Skill；原生会话历史持续保留。工具调用、策略检查、取消和会话生命周期由 DSH 执行。上游 Hermes 的消息协议仅在本机适配层使用；插件不提供额外的模型 API 或外部 harness 配置。
+
+同一会话按接收顺序排队，检索、推理和自总结完成后才处理下一条；不同会话独立推进。图片下载和提交阶段也按聊天会话串行，避免消息插队。取消等待中的任务不会中断前面的任务；“停止”取消当前任务，后续队列继续。“清除上下文 / 新对话 / reset”会取消本会话当前和等待任务，切换到新的原生会话，长期记忆不受影响。旧 DSH 会话日志仍由宿主保管。
+
+会话绑定保存在插件数据目录的 `sessions/`。宿主提供 `sessionPersistence` 服务时，重载后通过原生恢复接口继续同一会话；未启用该服务时，只保证当前运行期间驻留。插件重载会取消聊天执行中和等待中的任务，聊天队列不跨重启重放；GitHub 队列持久化，重载时未完成的任务重新排队。旧机器人历史只在首次新建原生会话时导入一次，不在每轮重复注入。自总结使用独立的临时 Agent，避免总结提示词混入聊天或仓库会话。
 
 ## 提示词、记忆与 Skill
 
@@ -58,6 +62,7 @@ Synapse 为每次任务创建受宿主管理的 Agent，继承 DSH 的当前 pro
   memory.sqlite                           记忆及审查队列
   runtime/                                动态安装的推理依赖
   models/                                 Hugging Face 模型缓存
+  sessions/                               通道与 DSH 会话 ID 的持久化绑定
   bot/configs/                            上游生效配置
   bot/data/                               上游历史与运行状态
   bot/logs/                               上游日志
@@ -92,7 +97,7 @@ Webhook URL：`https://<DSH域名>/hooks/dsh-synapse/github`。配置 `applicati
 
 插件验证原始请求体 HMAC-SHA256，按 delivery ID 去重并持久化任务。PR 抓取分页文件差异、固定 head SHA，发布前再次核对 head；过期事件跳过。超过差异上限会明确标记截断。Issue 生成分诊建议。默认在管理面板预览结果；启用「自动发布审查评论」后创建 PR 的 COMMENT review 或 Issue comment，不自动 approve 或 merge。每条评论带 delivery 标记，重试前检查远程标记以避免重复发布。
 
-失败任务保留错误，可从面板重试；重启恢复运行中的任务。Webhook 通知同时转发上游 GitHub 订阅功能。旧上游未认证监听端口被禁用。
+同一仓库的 PR / Issue 共用原生会话并串行审查，不同仓库最多并行处理四个。失败任务保留错误，可从面板重试；重启恢复运行中的任务。Webhook 通知同时转发上游 GitHub 订阅功能。旧上游未认证监听端口被禁用。
 
 ## 开发与验证
 

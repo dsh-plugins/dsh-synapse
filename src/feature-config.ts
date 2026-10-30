@@ -113,7 +113,7 @@ export const moduleFields: ConfigField[] = [
     flag("replyPerSentence", "逐句发送回复", true),
     num("compactMaxChars", "合并转发字符阈值（0 关闭）", 300),
     num("compactMaxLines", "合并转发行数阈值（0 关闭）", 5),
-    num("localHistoryMaxMessages", "会话上下文消息数", 24),
+    num("localHistoryMaxMessages", "首次创建 DSH 会话时导入的旧历史条数", 24),
     flag("persistHistoryEnabled", "保存会话历史", true),
     num("persistHistoryMax", "历史保留消息数", 100),
     flag("approvalEnabled", "在聊天通道显示 DSH 审批", true),

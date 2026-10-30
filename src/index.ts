@@ -47,7 +47,7 @@ export async function createService(
   const bot = new Bot(paths, config, gateway, onError),
     reviews = new Reviews(memory.db, agent, config, bot, onError);
   const close = async () => {
-    await Promise.allSettled([
+    const results = await Promise.allSettled([
       reviews.close(),
       bot.stop(),
       gateway.close(),
@@ -55,6 +55,8 @@ export async function createService(
       mcp.close(),
       inference.close(),
     ]);
+    for (const result of results)
+      if (result.status === "rejected") onError(result.reason);
     memory.close();
   };
   try {

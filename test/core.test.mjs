@@ -207,12 +207,37 @@ test("agent injects SOUL, retrieved skill and memory; tools execute only in chat
       },
     },
   });
-  assert.equal(await a.run("question"), "done");
+  assert.equal(
+    await a.run(
+      "question",
+      "chat",
+      [],
+      undefined,
+      undefined,
+      "",
+      undefined,
+      "chat:group:123",
+    ),
+    "done",
+  );
   assert.equal(calls, 1);
-  assert.equal(await a.run("question", "review"), "done");
+  assert.equal(
+    await a.run(
+      "question",
+      "review",
+      [],
+      undefined,
+      undefined,
+      "",
+      undefined,
+      "review:github:owner/repo",
+    ),
+    "done",
+  );
   assert.equal(calls, 1);
-  assert.equal(host.disposed.length, 2);
+  assert.equal(host.disposed.length, 0);
   await a.close();
+  assert.equal(host.disposed.length, 2);
 });
 test("Gateway authenticates, serves replayable completion events, and stops runs", async () => {
   const g = new Gateway({ run: async () => "hello" }, config, () => {});
@@ -226,7 +251,7 @@ test("Gateway authenticates, serves replayable completion events, and stops runs
     const response = await fetch(g.url + "/v1/runs", {
       method: "POST",
       headers,
-      body: JSON.stringify({ input: "hi" }),
+      body: JSON.stringify({ input: "hi", session_id: "user_1" }),
     });
     const { run_id } = await response.json();
     const events = await (
@@ -267,7 +292,7 @@ test("Gateway routes single-use DSH approval and cancels pending approval on sto
     });
   try {
     const { run_id: first } = await (
-      await post("/v1/runs", { input: "read" })
+      await post("/v1/runs", { input: "read", session_id: "group_123" })
     ).json();
     assert.equal(
       (await post(`/v1/runs/${first}/approval`, { choice: "always" })).status,
@@ -287,7 +312,7 @@ test("Gateway routes single-use DSH approval and cancels pending approval on sto
       409,
     );
     const { run_id: second } = await (
-      await post("/v1/runs", { input: "read" })
+      await post("/v1/runs", { input: "read", session_id: "group_123" })
     ).json();
     await post(`/v1/runs/${second}/stop`);
     assert.match(
@@ -308,9 +333,15 @@ test("durable GitHub queue creates head-bound review, deduplicates publication a
     publishReviews: true,
     repositories: "owner/repo",
   };
+  const bound = [];
   const r = new Reviews(
     memory.db,
-    { run: async () => "Finding" },
+    {
+      run: async (...args) => {
+        bound.push(args[7]);
+        return "Finding";
+      },
+    },
     () => c,
     { notify() {} },
     () => {},
@@ -336,6 +367,7 @@ test("durable GitHub queue creates head-bound review, deduplicates publication a
     }),
   };
   assert.equal((await r.review(job)).published, true);
+  assert.deepEqual(bound, ["review:github:owner/repo"]);
   assert.equal(posted[0].commit_id, "abc");
   assert.match(posted[0].body, /dsh-synapse:delivery/);
   job.payload = job.payload.replace("abc", "old");
@@ -343,3 +375,56 @@ test("durable GitHub queue creates head-bound review, deduplicates publication a
   await r.close();
   memory.close();
 });
+
+test(
+  "GitHub repositories run concurrently while each repository stays FIFO",
+  { timeout: 10000 },
+  async () => {
+    const memory = new Memory(":memory:", inference, config);
+    const c = { ...config(), githubEnabled: true };
+    const r = new Reviews(
+      memory.db,
+      {},
+      () => c,
+      {},
+      () => {},
+    );
+    let release, entered;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const other = new Promise((resolve) => {
+      entered = resolve;
+    });
+    const starts = [];
+    r.review = async (job) => {
+      starts.push(job.id);
+      if (job.id === "a1") await gate;
+      if (job.id === "b1") entered();
+      return { output: job.id };
+    };
+    for (const [id, repo] of [
+      ["a1", "Owner/A"],
+      ["a2", "owner/a"],
+      ["b1", "owner/b"],
+    ])
+      memory.db
+        .prepare(
+          "INSERT INTO deliveries(id,event,payload,state) VALUES(?,'issues',?,'pending')",
+        )
+        .run(id, JSON.stringify({ repository: { full_name: repo } }));
+    try {
+      const task = r.drain();
+      await other;
+      assert.deepEqual(starts, ["a1", "b1"]);
+      release();
+      await task;
+      assert.deepEqual(starts, ["a1", "b1", "a2"]);
+      assert(r.list().every((j) => j.state === "complete"));
+    } finally {
+      release();
+      await r.close();
+      memory.close();
+    }
+  },
+);

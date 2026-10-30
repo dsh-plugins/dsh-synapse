@@ -9,7 +9,9 @@ this distribution follows the actual AGPL license.
 Synapse modifications are recorded by `scripts/build.mjs`: supervise shutdown
 and restart through IPC, replace the unauthenticated webhook listener with IPC,
 resolve SOUL.md from the active DSH profile and home, and use file polling for
-configuration reload to avoid a Windows libuv directory-watcher assertion. All feature modules
+configuration reload to avoid a Windows libuv directory-watcher assertion.
+The adapter also shares native sessions by group/private chat,
+serializes incoming message preparation, and forwards context resets to DSH. All feature modules
 remain included. Hermes bridge code includes upstream's attribution to Amorter
 and qq-hermes-bridge (MIT); those notices are preserved in source.
 

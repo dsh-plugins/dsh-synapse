@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { randomUUID, randomBytes } from "node:crypto";
 import { body, json, equalSecret } from "./http.js";
 import type { ApprovalAnswer } from "./harness.js";
+import { chatSessionKey } from "./session-bindings.js";
 interface Run {
   created: number;
   events: any[];
@@ -60,6 +61,11 @@ export class Gateway {
     if (!equalSecret(req.headers.authorization, `Bearer ${this.token}`))
       return json(res, { error: "Unauthorized" }, 401);
     const url = new URL(req.url, "http://localhost");
+    if (url.pathname === "/v1/sessions/reset" && req.method === "POST") {
+      const data = JSON.parse((await body(req)).toString());
+      await this.agent.reset(chatSessionKey(data.session_id));
+      return json(res, { ok: true });
+    }
     if (
       !/^\/v1\/runs(?:\/[a-zA-Z0-9_-]+\/(?:events|approval|stop))?$/.test(
         url.pathname,
@@ -68,12 +74,10 @@ export class Gateway {
       return json(res, { error: "Not found" }, 404);
     const c = this.config();
     if (url.pathname === "/v1/runs" && req.method === "POST") {
-      if (
-        [...this.runs.values()].filter((r) => !r.done).length >= 16 ||
-        this.runs.size >= 500
-      )
+      if (this.runs.size >= 500)
         return json(res, { error: "运行队列已满" }, 429);
       const data = JSON.parse((await body(req)).toString());
+      const sessionKey = chatSessionKey(data.session_id);
       const id = randomUUID(),
         controller = new AbortController();
       const run: Run = {
@@ -95,7 +99,8 @@ export class Gateway {
         run.events.push(item);
         for (const listener of run.listeners) listener(item);
       };
-      json(res, { run_id: id, status: "running" }, 202);
+      emit("run.queued", { session: sessionKey });
+      json(res, { run_id: id, status: "queued" }, 202);
       run.task = this.agent
         .run(
           data.input,
@@ -107,6 +112,7 @@ export class Gateway {
           c.modules.chat.approvalEnabled
             ? (request) => this.askApproval(run, request, emit)
             : undefined,
+          sessionKey,
         )
         .then(
           (output) => emit("run.completed", { output }),

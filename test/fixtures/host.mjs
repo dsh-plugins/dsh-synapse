@@ -1,14 +1,124 @@
 import { randomUUID } from "node:crypto";
 
-// Contract fixture for the public native Agent lifecycle (not a second model API).
+// Native lifecycle contract fixture; durable history survives owner disposal.
 export function hostFixture(execute = async () => "done") {
   const created = [],
+    resumed = [],
     disposed = [],
-    attachments = [];
+    attachments = [],
+    stored = new Map();
   let selection = {
     provider: "configured-provider",
     model: "configured-model",
   };
+  async function create(options) {
+    const id = options.sessionId ?? options.resumeSessionId;
+    const conversation = stored.get(id) ?? [];
+    stored.set(id, conversation);
+    const listeners = new Map(),
+      tools = [],
+      sections = [],
+      variables = new Map(),
+      injected = [],
+      restrictions = [],
+      selected = [];
+    let controller = new AbortController(),
+      task = Promise.resolve();
+    const emit = (name, data) => listeners.get(name)?.({ agent, ...data });
+    const scope = {
+      get: (name) =>
+        ({
+          systemPrompt: {
+            section: (s) => sections.push(s),
+            variable: (name, fn) => variables.set(name, fn),
+          },
+          tools: {
+            restrict: (filter) => restrictions.push(filter),
+            register: (tool) => {
+              tools.push(tool);
+              return () => tools.splice(tools.indexOf(tool), 1);
+            },
+          },
+        })[name],
+      on: (name, fn) => listeners.set(name, fn),
+    };
+    const agent = {
+      id,
+      ctx: scope,
+      model: { select: (s) => selected.push(s) },
+      inject: (message) => {
+        injected.push(message);
+        conversation.push(message);
+      },
+      cancel: () => controller.abort(),
+      followup: (message) => {
+        controller = new AbortController();
+        task = (async () => {
+          try {
+            conversation.push(message);
+            await listeners.get("agent/pre-step")?.({ agent }, async () => ({
+              kind: "enter",
+            }));
+            const output = await execute({
+              options,
+              message,
+              conversation,
+              injected,
+              selected,
+              tools,
+              sections,
+              variables,
+              restrictions,
+              signal: controller.signal,
+              emit,
+              approve: (req) =>
+                listeners.get("approval/request")?.(
+                  { agent, ...req },
+                  async () => "unavailable",
+                ),
+            });
+            emit("agent/assistant-stream", { frame: { type: "start" } });
+            emit("agent/assistant-stream", {
+              frame: {
+                type: "chunk",
+                chunk: { type: "text-delta", text: output },
+              },
+            });
+            emit("agent/assistant-stream", {
+              frame: {
+                type: "end",
+                outcome: { kind: "committed", eventType: "assistant/message" },
+              },
+            });
+            conversation.push({ role: "assistant", content: output });
+          } catch (error) {
+            emit("agent/error", { error });
+          }
+        })();
+      },
+      whenIdle: () => task,
+    };
+    await options.setup(scope, agent);
+    const record = {
+      options,
+      agent,
+      tools,
+      restrictions,
+      injected,
+      conversation,
+      selected,
+    };
+    if (options.resumeSessionId) resumed.push(record);
+    else created.push(record);
+    return {
+      agent,
+      dispose: async () => {
+        disposed.push(agent.id);
+        controller.abort();
+        await task;
+      },
+    };
+  }
   const loader = {
     llm: {
       createUserMessage: (input) => ({
@@ -20,102 +130,16 @@ export function hostFixture(execute = async () => "done") {
     services: {
       get: (name) =>
         ({
+          agents: { create, resume: create },
+          sessionPersistence: {
+            stat: async (id) =>
+              stored.has(id) ? { header: { id } } : undefined,
+          },
           agentDefaultModel: { currentSelection: () => ({ ...selection }) },
           attachments: {
             saveImage: async (image) => {
               attachments.push(image);
               return { attachmentId: "image-1" };
-            },
-          },
-          agents: {
-            create: async (options) => {
-              const listeners = new Map(),
-                tools = [],
-                sections = [],
-                variables = new Map(),
-                injected = [],
-                restrictions = [];
-              const controller = new AbortController();
-              let task = Promise.resolve();
-              const emit = (name, data) =>
-                listeners.get(name)?.({ agent, ...data });
-              const scope = {
-                get: (name) =>
-                  ({
-                    systemPrompt: {
-                      section: (s) => sections.push(s),
-                      variable: (name, fn) => variables.set(name, fn),
-                    },
-                    tools: {
-                      restrict: (filter) => restrictions.push(filter),
-                      register: (tool) => tools.push(tool),
-                    },
-                  })[name],
-                on: (name, fn) => listeners.set(name, fn),
-              };
-              const agent = {
-                id: options.sessionId,
-                ctx: scope,
-                inject: (message) => injected.push(message),
-                cancel: () => controller.abort(),
-                followup: (message) => {
-                  task = (async () => {
-                    try {
-                      await listeners.get("agent/pre-step")?.(
-                        { agent },
-                        async () => ({ kind: "enter" }),
-                      );
-                      const output = await execute({
-                        options,
-                        message,
-                        injected,
-                        tools,
-                        sections,
-                        variables,
-                        restrictions,
-                        signal: controller.signal,
-                        emit,
-                        approve: (req) =>
-                          listeners.get("approval/request")?.(
-                            { agent, ...req },
-                            async () => "unavailable",
-                          ),
-                      });
-                      emit("agent/assistant-stream", {
-                        frame: { type: "start" },
-                      });
-                      emit("agent/assistant-stream", {
-                        frame: {
-                          type: "chunk",
-                          chunk: { type: "text-delta", text: output },
-                        },
-                      });
-                      emit("agent/assistant-stream", {
-                        frame: {
-                          type: "end",
-                          outcome: {
-                            kind: "committed",
-                            eventType: "assistant/message",
-                          },
-                        },
-                      });
-                    } catch (error) {
-                      emit("agent/error", { error });
-                    }
-                  })();
-                },
-                whenIdle: () => task,
-              };
-              await options.setup(scope, agent);
-              created.push({ options, agent, tools, restrictions, injected });
-              return {
-                agent,
-                dispose: async () => {
-                  disposed.push(agent.id);
-                  controller.abort();
-                  await task;
-                },
-              };
             },
           },
         })[name],
@@ -124,8 +148,10 @@ export function hostFixture(execute = async () => "done") {
   return {
     loader,
     created,
+    resumed,
     disposed,
     attachments,
+    stored,
     select: (value) => {
       selection = value;
     },

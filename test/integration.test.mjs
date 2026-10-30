@@ -69,6 +69,7 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
   };
   c.modules.command.groups = [123];
   Object.assign(c.modules.chat, {
+    requireMention: false,
     groups: [123],
     reactionEnabled: false,
     progressAsImage: false,
@@ -102,8 +103,18 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
     socket = s;
   });
   const errors = [],
+    received = [],
+    resets = [],
     gateway = new Gateway(
-      { run: async () => "hello" },
+      {
+        run: async (...args) => {
+          received.push({ input: args[0], key: args[7] });
+          return "hello";
+        },
+        reset: async (key) => {
+          resets.push(key);
+        },
+      },
       () => c,
       (e) => errors.push(e.message),
     );
@@ -160,6 +171,33 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
         ),
       12000,
     );
+    assert.equal(received[0].key, "chat:user:1");
+    for (const [user, text] of [
+      [1, "first group message"],
+      [2, "second group message"],
+      [1, "清除上下文"],
+    ])
+      socket.send(
+        JSON.stringify({
+          post_type: "message",
+          message_type: "group",
+          group_id: 123,
+          user_id: user,
+          self_id: 42,
+          message_id: 100 + user,
+          raw_message: text,
+          message: [{ type: "text", data: { text } }],
+          sender: { user_id: user, nickname: "tester" + user, role: "owner" },
+        }),
+      );
+    await waitFor(() => resets.length === 1, 12000);
+    assert.deepEqual(
+      received.slice(1).map((r) => r.key),
+      ["chat:group:123", "chat:group:123"],
+    );
+    assert.match(received[1].input, /first group message/);
+    assert.match(received[2].input, /second group message/);
+    assert.deepEqual(resets, ["chat:group:123"]);
     assert.deepEqual(errors, []);
   } catch (e) {
     const log = await readFile(
