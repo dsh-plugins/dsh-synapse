@@ -1,0 +1,97 @@
+* {
+    font-family: "Sarasa Fixed SC", sans-serif;
+    margin: 0;
+}
+
+body {
+    background-color: #00000000;
+}
+
+.container {
+    background-color: #F3F4F6;
+    width: 800px;
+    border-radius: 15px;
+    padding: 10px;
+}
+
+.cover {
+    width: 800px;
+    border-radius: 10px;
+}
+
+.up {
+    margin: 10px;
+}
+
+.up-avatar {
+    display: inline-block;
+    position: absolute;
+    border: 4px solid #fff;
+    border-radius: 99999px;
+    width: 50px;
+    height: 50px;
+}
+
+.up-name {
+    display: block;
+    width: 100%;
+    margin-left: 60px;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+.up-date {
+    display: inline-block;
+    margin-left: 60px;
+    font-size: 14px;
+    color: #999;
+}
+
+.up-date::after {
+    display: inline-block;
+    content: "·";
+    font-size: 14px;
+    color: #999;
+}
+
+.up-duration {
+    display: inline-block;
+    font-size: 14px;
+    color: #999;
+}
+
+.title {
+    margin: 10px;
+    font-size: 24px;
+    font-weight: bold;
+}
+
+.stats {
+    color: #5A5F66;
+    font-size: 14px;
+}
+
+.stats svg {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.view {
+    display: inline-block;
+    margin-left: 30px;
+}
+
+.like {
+    display: inline-block;
+    margin-left: 10px;
+}
+
+.reply {
+    display: inline-block;
+    margin-left: 10px;
+}
+
+.description {
+    margin: 20px;
+    font-size: 20px;
+}

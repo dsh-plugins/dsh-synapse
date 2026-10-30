@@ -1,0 +1,144 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #313338;
+    color: #dbdee1;
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    font-size: 15px;
+    line-height: 1.45;
+}
+
+.container {
+    width: 640px;
+    padding: 16px 20px;
+}
+
+.header {
+    color: #949ba4;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #3f4147;
+}
+
+.content {
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+}
+
+.content p {
+    margin: 4px 0;
+}
+
+.content h1,
+.content h2,
+.content h3 {
+    color: #f2f3f5;
+    margin: 10px 0 4px;
+    line-height: 1.3;
+}
+
+.content h1 {
+    font-size: 22px;
+}
+
+.content h2 {
+    font-size: 19px;
+}
+
+.content h3 {
+    font-size: 16px;
+}
+
+.content code {
+    background: #1e1f22;
+    border-radius: 4px;
+    padding: 1px 4px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 13px;
+    color: #e3e5e8;
+}
+
+.content pre {
+    background: #1e1f22;
+    border: 1px solid #2b2d31;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 6px 0;
+    overflow-x: auto;
+}
+
+.content pre code {
+    background: transparent;
+    padding: 0;
+    white-space: pre;
+}
+
+.content blockquote {
+    border-left: 4px solid #4e5058;
+    padding-left: 12px;
+    margin: 6px 0;
+    color: #b5bac1;
+}
+
+.content ul,
+.content ol {
+    padding-left: 24px;
+    margin: 4px 0;
+}
+
+.content a {
+    color: #00a8fc;
+    text-decoration: none;
+}
+
+.content a:hover {
+    text-decoration: underline;
+}
+
+.content img {
+    max-width: 100%;
+    border-radius: 4px;
+}
+
+.content hr {
+    border: none;
+    border-top: 1px solid #3f4147;
+    margin: 10px 0;
+}
+
+.content table {
+    border-collapse: collapse;
+    margin: 6px 0;
+}
+
+.content th,
+.content td {
+    border: 1px solid #4e5058;
+    padding: 4px 10px;
+}
+
+.mention {
+    color: #c9cdfb;
+    background: rgba(88, 101, 242, 0.3);
+    border-radius: 3px;
+    padding: 0 2px;
+    font-weight: 500;
+}
+
+.spoiler {
+    background: #1e1f22;
+    color: #1e1f22;
+    border-radius: 4px;
+    padding: 0 4px;
+}
+
+.emoji {
+    height: 1.2em;
+    vertical-align: -0.2em;
+}

@@ -1,0 +1,412 @@
+* {
+    font-family: "Sarasa Fixed SC", sans-serif;
+    margin: 0;
+    box-sizing: border-box;
+    --fontStack-monospace: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+    --fontStack-sansSerif: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"
+}
+
+body {
+    margin: 10px;
+    font-family: var(--fontStack-sansSerif), serif;
+    font-size: .875rem;
+    font-weight: 400;
+    color: #1f2328;
+    background-color: #fff;
+    line-height: 1.5;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.message {
+    display: inline-block;
+}
+
+.user {
+    display: inline-block;
+    font-weight: bold;
+}
+
+.repository_header {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    min-height: 52px;
+    padding: .65rem 1.2rem;
+    color: #f0f6fc;
+    background: #161b22;
+    font-size: 1rem;
+    line-height: 1.25;
+    overflow: hidden;
+}
+
+.repository_mark {
+    width: 30px;
+    height: 30px;
+    margin-right: .2rem;
+    flex: 0 0 auto;
+    fill: #f0f6fc;
+}
+
+.repository_owner,
+.repository_name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.repository_owner {
+    color: #c9d1d9;
+}
+
+.repository_separator {
+    color: #8b949e;
+}
+
+.repository_name {
+    color: #f0f6fc;
+}
+
+.repository_chevron {
+    display: inline-flex;
+    align-items: center;
+    margin-left: .1rem;
+}
+
+.repository_chevron svg {
+    width: 16px;
+    height: 16px;
+    fill: #8b949e;
+}
+
+.container {
+    padding: 0 1.5rem;
+    width: 100%;
+    max-width: 1280px;
+    display: block;
+    word-wrap: break-word;
+}
+
+.release_header {
+    padding: 1.5rem 0 1rem;
+}
+
+.release_title_row {
+    display: flex;
+    align-items: center;
+    flex-flow: wrap;
+    gap: .5rem;
+}
+
+.release_title {
+    font-size: 1.75rem;
+    font-weight: 600;
+    line-height: 1.25;
+    margin: 0;
+}
+
+/* 「Latest」徽章 */
+.release_badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+    padding: 0 .5rem;
+    height: 24px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #1a7f37;
+    border: 1px solid #1a7f3755;
+    background-color: #1a7f371a;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.release_badge_prerelease {
+    color: #9a6700;
+    border-color: #9a670055;
+    background-color: #9a67001a;
+}
+
+.release_tag_row {
+    display: flex;
+    align-items: center;
+    gap: .375rem;
+    margin-top: .5rem;
+    font-size: .875rem;
+}
+
+.release_tag_icon {
+    width: 16px;
+    height: 16px;
+    fill: #59636e;
+    flex: 0 0 auto;
+}
+
+.release_tag_name {
+    font-family: var(--fontStack-monospace), serif;
+    color: #0969da;
+    background-color: #0969da1a;
+    border-radius: 6px;
+    padding: .125rem .375rem;
+    font-size: .75rem;
+}
+
+.release_tag_meta {
+    color: #59636e;
+    font-size: .75rem;
+}
+
+.release_meta_row {
+    display: flex;
+    align-items: center;
+    gap: .25rem;
+    margin-top: .75rem;
+    color: #59636e;
+    font-size: .875rem;
+}
+
+.release_author {
+    color: #1f2328;
+    font-weight: 600;
+}
+
+.header_body_splitter {
+    margin-left: auto;
+    margin-right: auto;
+    margin-bottom: 1.5rem;
+}
+
+.release_body {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    padding-bottom: 1.25rem;
+}
+
+.content_container {
+    border-width: 1px;
+    border-style: solid;
+    border-color: #d1d9e0;
+    border-radius: 6px;
+    min-width: 0;
+}
+
+.content_body {
+    padding: 1rem;
+
+    img {
+        max-width: 100%;
+        height: auto;
+    }
+}
+
+/* 正文中的 issue/PR 引用（与 issue 卡片一致） */
+.issue-ref {
+    display: inline;
+}
+
+.issue-ref-icon {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: -2px;
+    margin-right: 3px;
+}
+
+.issue-ref-title {
+    color: #0969da;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.issue-ref-number {
+    color: #0969da;
+    text-decoration: none;
+    margin-left: 3px;
+    white-space: nowrap;
+}
+
+p {
+    margin: 0 0 1rem;
+}
+
+code {
+    tab-size: 4;
+    font-family: var(--fontStack-monospace), serif;
+    white-space: break-spaces;
+    background-color: #818b981f;
+    border-radius: 6px;
+    margin: 0;
+    padding: .2em .4em;
+    font-size: 85%;
+}
+
+pre {
+    background-color: #f6f8fa;
+    border-radius: 6px;
+    padding: 1rem;
+    overflow: auto;
+    margin: 0 0 1rem;
+}
+
+pre code {
+    background: transparent;
+    padding: 0;
+    font-size: 85%;
+}
+
+blockquote {
+    color: #59636e;
+    border-left: .25em solid #d1d9e0;
+    padding: 0 1em;
+    margin: 0;
+}
+
+div {
+    min-height: 0;
+}
+
+/* Assets 区块 */
+.assets_section {
+    border: 1px solid #d1d9e0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.assets_header {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .75rem 1rem;
+    background-color: #f6f8fa;
+    border-bottom: 1px solid #d1d9e0b3;
+}
+
+.assets_title {
+    font-size: .875rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.assets_count {
+    color: #59636e;
+    font-size: .75rem;
+}
+
+.assets_list {
+    display: flex;
+    flex-direction: column;
+}
+
+.asset_item {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .75rem 1rem;
+    border-bottom: 1px solid #d1d9e0b3;
+    font-size: .875rem;
+}
+
+.asset_item:last-child {
+    border-bottom: none;
+}
+
+.asset_icon {
+    width: 16px;
+    height: 16px;
+    fill: #59636e;
+    flex: 0 0 auto;
+}
+
+.asset_name {
+    color: #0969da;
+    font-weight: 600;
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.asset_size {
+    color: #59636e;
+    font-size: .75rem;
+    flex: 0 0 auto;
+}
+
+.asset_downloads {
+    color: #59636e;
+    font-size: .75rem;
+    flex: 0 0 auto;
+}
+
+.asset_spacer {
+    flex-grow: 1;
+}
+
+.empty_assets {
+    padding: .75rem 1rem;
+    color: #59636e;
+    font-size: .875rem;
+}
+
+h1, h2, h3 {
+    font-weight: 600;
+}
+
+h1 {
+    font-size: 1.5rem;
+    margin: 0 0 1rem;
+    padding-bottom: .3em;
+    border-bottom: 1px solid #d1d9e0b3;
+}
+
+h2 {
+    font-size: 1.25rem;
+    margin: 0 0 1rem;
+    padding-bottom: .3em;
+    border-bottom: 1px solid #d1d9e0b3;
+}
+
+h3 {
+    font-size: 1rem;
+    margin: 0 0 1rem;
+}
+
+ul, ol {
+    padding-left: 1.5rem;
+    margin: 0 0 1rem;
+}
+
+li + li {
+    margin-top: .25rem;
+}
+
+a {
+    color: #0969da;
+    text-decoration: none;
+}
+
+table {
+    border-collapse: collapse;
+    margin: 0 0 1rem;
+    width: auto;
+}
+
+th, td {
+    border: 1px solid #d1d9e0;
+    padding: .375rem .75rem;
+}
+
+th {
+    background-color: #f6f8fa;
+    font-weight: 600;
+}
+
+img {
+    max-width: 100%;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid #d1d9e0b3;
+    margin: 1.5rem 0;
+}

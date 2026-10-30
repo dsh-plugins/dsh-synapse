@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>需要审批</title>
+    <link rel="stylesheet" href="./style/approval.css">
+</head>
+<body>
+<div class="card" style="border: 2px solid {{riskColor}}">
+    <div class="header">
+        <span class="icon">⚠️</span>
+        <span class="title" style="color: {{riskColor}}">需要审批</span>
+    </div>
+    {{toolSection}}
+    <div class="section">
+        <div class="label">命令</div>
+        <div class="value">{{command}}</div>
+    </div>
+    {{previewSection}}
+    <div class="actions">
+        回复以下内容进行审批：<br>
+        <span class="cmd">批准</span> 或 <span class="cmd">通过</span> — 允许一次<br>
+        <span class="cmd">拒绝</span> 或 <span class="cmd">deny</span> — 拒绝执行<br>
+        <span class="cmd">本次允许</span> 或 <span class="cmd">session</span> — 本次会话内允许<br>
+        <span class="cmd">始终允许</span> 或 <span class="cmd">always</span> — 永久允许该命令
+    </div>
+    <div class="footer">run: {{runId}}</div>
+</div>
+</body>
+</html>

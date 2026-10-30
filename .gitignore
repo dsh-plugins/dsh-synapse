@@ -1,0 +1,6 @@
+node_modules/
+lib/
+*.tgz
+.test-data/
+*.log
+.runtime-test/

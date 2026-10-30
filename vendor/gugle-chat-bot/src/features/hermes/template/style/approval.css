@@ -1,0 +1,81 @@
+/* Hermes 审批卡片（移植自 qq-hermes-bridge src/renderer.ts，MIT 协议，原作者 Amorter） */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: #12101F;
+    color: #2C2A3A;
+    padding: 20px;
+    width: 500px;
+}
+
+.card {
+    background: #F8F0FF;
+    border-radius: 12px;
+    padding: 18px;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.header .icon {
+    font-size: 22px;
+}
+
+.header .title {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.section {
+    margin: 10px 0;
+}
+
+.label {
+    font-size: 12px;
+    color: #9A8EA9;
+    margin-bottom: 4px;
+}
+
+.value {
+    font-family: monospace;
+    font-size: 13px;
+    background: #EADCF8;
+    padding: 8px;
+    border-radius: 6px;
+    word-break: break-all;
+    max-height: 100px;
+    overflow: hidden;
+}
+
+.actions {
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid #DBC4E6;
+    font-size: 13px;
+    color: #9A8EA9;
+    line-height: 1.8;
+}
+
+.actions .cmd {
+    color: #6CD4FF;
+    font-family: monospace;
+    background: #EADCF8;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.footer {
+    margin-top: 10px;
+    font-size: 11px;
+    color: #9A8EA9;
+    text-align: right;
+}

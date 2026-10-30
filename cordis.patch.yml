@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-synapse
+      name: '@dsh-plugin/dsh-synapse'

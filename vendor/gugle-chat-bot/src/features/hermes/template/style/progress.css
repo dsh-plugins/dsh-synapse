@@ -1,0 +1,120 @@
+/* Hermes 进度卡片（移植自 qq-hermes-bridge src/renderer.ts，MIT 协议，原作者 Amorter） */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: #12101F;
+    color: #2C2A3A;
+    padding: 20px;
+    width: 500px;
+}
+
+.card {
+    background: #F8F0FF;
+    border-radius: 12px;
+    padding: 18px;
+    border: 1px solid #D4A5D4;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #DBC4E6;
+}
+
+.header .icon {
+    font-size: 22px;
+}
+
+.header .title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #FF8BA7;
+}
+
+.header .elapsed {
+    margin-left: auto;
+    font-size: 12px;
+    color: #9A8EA9;
+}
+
+.tool-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 13px;
+}
+
+.tool-row .icon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.tool-row .name {
+    color: #6CD4FF;
+    font-family: monospace;
+}
+
+.tool-row .dur {
+    color: #9A8EA9;
+    font-size: 11px;
+    margin-left: auto;
+}
+
+.preview {
+    font-size: 11px;
+    color: #9A8EA9;
+    padding-left: 24px;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.current-tool {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    margin-top: 6px;
+    border-top: 1px dashed #DBC4E6;
+}
+
+.spinner {
+    font-size: 16px;
+}
+
+.current-tool .name {
+    color: #F5C842;
+    font-family: monospace;
+    font-size: 13px;
+}
+
+.response-preview {
+    margin-top: 10px;
+    padding: 8px;
+    background: #EADCF8;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #9A8EA9;
+    max-height: 60px;
+    overflow: hidden;
+    word-break: break-all;
+}
+
+.footer {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid #DBC4E6;
+    font-size: 11px;
+    color: #9A8EA9;
+    text-align: right;
+}

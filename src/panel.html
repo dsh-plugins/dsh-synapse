@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>Synapse · 通道与记忆</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, sans-serif;
+      background: Canvas;
+      color: CanvasText;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+    }
+    main {
+      max-width: 1100px;
+      margin: auto;
+      padding: 32px 24px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 32px;
+    }
+    header p {
+      opacity: 0.65;
+    }
+    nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid #8885;
+      padding: 20px 0;
+    }
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+      color: inherit;
+      background: transparent;
+      border: 1px solid #8887;
+      border-radius: 7px;
+      padding: 9px;
+    }
+    button {
+      cursor: pointer;
+    }
+    button:hover,
+    button[aria-selected="true"] {
+      background: #34877825;
+      border-color: #348778;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: wait;
+    }
+    textarea {
+      width: 100%;
+      min-height: 180px;
+      resize: vertical;
+      font:
+        14px/1.6 ui-monospace,
+        monospace;
+    }
+    input:not([type="checkbox"]),
+    select {
+      width: 100%;
+    }
+    label {
+      display: block;
+      margin: 12px 0 5px;
+    }
+    fieldset {
+      border: 1px solid #8885;
+      border-radius: 10px;
+      padding: 18px;
+      margin: 18px 0;
+      min-width: 0;
+    }
+    legend {
+      padding: 0 8px;
+      font-weight: 600;
+    }
+    section {
+      padding: 18px 0;
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      max-height: 500px;
+      overflow: auto;
+      padding: 16px;
+      border: 1px solid #8885;
+      border-radius: 8px;
+    }
+    article {
+      border-bottom: 1px solid #8885;
+      padding: 12px 0;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 12px 0;
+    }
+    .muted {
+      font-size: 13px;
+      opacity: 0.7;
+    }
+    #notice {
+      min-height: 24px;
+      padding: 12px 0;
+    }
+    #notice.error {
+      color: #d85050;
+    }
+    .two {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 24px;
+    }
+    .row {
+      padding: 12px;
+      border-left: 2px solid #348778;
+      margin: 10px 0;
+    }
+    details {
+      padding: 8px 0;
+    }
+    summary {
+      cursor: pointer;
+    }
+    @media (max-width: 650px) {
+      main {
+        padding: 20px 12px;
+      }
+      .two {
+        grid-template-columns: 1fr;
+      }
+      header {
+        display: block;
+      }
+    }
+  </style>
+  <main>
+    <header>
+      <div>
+        <h1>Synapse</h1>
+        <p>QQ · Discord · GitHub，共享知识，各司其职。</p>
+      </div>
+      <span id="status">正在连接 DSH…</span>
+    </header>
+    <nav aria-label="管理模块" id="tabs"></nav>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <div id="content"></div>
+    <footer class="muted">
+      配置保存在当前 DSH
+      profile。模型首次使用时下载；聊天与审查记忆分开检索。<br />AGPL-3.0 ·
+      <a href="https://github.com/dsh-plugins/dsh-synapse">获取完整源码</a>
+    </footer>
+  </main>
+  <script type="module" src="/synapse-panel.js"></script>
+</html>

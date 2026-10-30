@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>{{issue title}}</title>
+    <link rel="stylesheet" href="./style/issue.css">
+</head>
+
+<body>
+{{header extra}}
+<div class="repository_header">
+    <svg class="repository_mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.04-2.2-.82-2.2-.82-.44 1.1-.16 1.91-.08 2.12-.51.56-.82 1.27-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38-.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+    <span class="repository_owner">{{repository owner}}</span>
+    <span class="repository_separator">/</span>
+    <strong class="repository_name">{{repository name}}</strong>
+    <span class="repository_chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"/></svg></span>
+</div>
+<div class="container">
+    <div class="issue_title_container">
+        <h1 class="issue_title">
+            <bdi>{{issue title}}</bdi>
+            <span class="issue_number">#{{issue number}}</span>
+        </h1>
+    </div>
+    <div class="state_label_wrapper">
+        <div class="state_label_container">
+            <div class="state_labels_aligner">
+                {{state label}}
+            </div>
+        </div>
+    </div>
+    <div class="header_body_splitter"></div>
+    <div class="body">
+        <div class="content">
+            <div class="content_container">
+                <div class="content_header">
+                    <span class="content_author">{{issue author}}</span>
+                    <span>opened at {{issue created at}}</span>
+                </div>
+                <div class="content_body">
+                    {{issue body}}
+                </div>
+            </div>
+        </div>
+        <div class="metadata">
+            <div class="metadata_contents">
+                <div class="metadata_content_container">
+                    <div class="metadata_content">
+                        <div class="metadata_content_contents">
+                            <div class="metadata_content_title_container"><h3 class="metadata_content_title">Assignees</h3></div>
+                            <span class="empty_text">in-development</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="metadata_content_container">
+                    <div class="metadata_content">
+                        <div class="metadata_content_contents">
+                            <div class="metadata_content_title_container"><h3 class="metadata_content_title">Labels</h3></div>
+                            <div class="metadata_labels_labels">
+                                {{issue labels}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="metadata_content_container">
+                    <div class="metadata_content">
+                        <div class="metadata_content_contents">
+                            <div class="metadata_content_title_container"><h3 class="metadata_content_title">Type</h3></div>
+                            <span class="empty_text">in-development</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="metadata_content_container">
+                    <div class="metadata_content">
+                        <div class="metadata_content_contents">
+                            <div class="metadata_content_title_container"><h3 class="metadata_content_title">Projects</h3></div>
+                            <span class="empty_text">in-development</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="metadata_content_container">
+                    <div class="metadata_content">
+                        <div class="metadata_content_contents">
+                            <div class="metadata_content_title_container"><h3 class="metadata_content_title">Milestone</h3></div>
+                            <span class="empty_text">in-development</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="metadata_content_container">
+                    <div class="metadata_content">
+                        <div class="metadata_content_contents">
+                            <div class="metadata_content_title_container"><h3 class="metadata_content_title">Relationships</h3></div>
+                            <span class="empty_text">in-development</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="metadata_content_container">
+                    <div class="metadata_content">
+                        <div class="metadata_content_contents">
+                            <div class="metadata_content_title_container"><h3 class="metadata_content_title">Development</h3></div>
+                            <span class="empty_text">in-development</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="metadata_content_container">
+                    <div class="metadata_content">
+                        <div class="metadata_content_contents">
+                            <div class="metadata_content_title_container"><h3 class="metadata_content_title">Participants</h3></div>
+                            <span class="empty_text">in-development</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
