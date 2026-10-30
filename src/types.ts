@@ -11,11 +11,11 @@ export interface McpSpec {
   enabled: boolean;
   transport: "stdio" | "http" | "sse";
   command: string;
-  argsJson: string;
-  envJson: string;
+  args: string[];
+  env: { name: string; value: string }[];
   url: string;
-  headersJson: string;
-  allowedTools: string;
+  headers: { name: string; value: string }[];
+  allowedTools: string[];
 }
 export interface SynapseConfig {
   enabled: boolean;
@@ -26,15 +26,11 @@ export interface SynapseConfig {
   httpToken: string;
   wsToken: string;
   chromePath: string;
-  botJson: string;
-  llmUrl: string;
-  llmKey: string;
-  model: string;
+  userAgent: string;
+  logLevel: string;
+  tokenParams: string;
   timeoutSec: number;
   maxToolRounds: number;
-  externalHermes: boolean;
-  hermesUrl: string;
-  hermesKey: string;
   githubEnabled: boolean;
   githubToken: string;
   webhookSecret: string;
@@ -48,8 +44,74 @@ export interface SynapseConfig {
   learnMemory: boolean;
   learnSkills: boolean;
   maxMemories: number;
-  features: { id: string; json: string }[];
-  mcp: McpSpec[];
+  modules: {
+    management: {
+      groups: number[];
+      operators: number[];
+      discordOperators: string[];
+    };
+    parentheses: { groups: number[] };
+    poke: { groups: number[] };
+    minecraft: { groups: number[] };
+    modrinth: { groups: number[] };
+    command: { groups: number[] };
+    bili: { groups: number[]; follow: number[] };
+    github: { subscriptions: { repository: string; groups: number[] }[] };
+    welcome: { welcomes: { group: number[]; msg: string }[] };
+    discord: {
+      token: string;
+      bridges: {
+        guildId: string;
+        channelName: string;
+        group: string;
+        needReply: boolean;
+        needCmd: boolean;
+      }[];
+    };
+    chat: {
+      botName: string;
+      groups: number[];
+      admins: number[];
+      allowedUsers: number[];
+      blockedUsers: number[];
+      requireMention: boolean;
+      keywordTriggers: string[];
+      progressRateLimitSec: number;
+      progressAsImage: boolean;
+      progressMaxTools: number;
+      maxMessageLength: number;
+      forwardImages: boolean;
+      replyPerSentence: boolean;
+      compactMaxChars: number;
+      compactMaxLines: number;
+      localHistoryMaxMessages: number;
+      persistHistoryEnabled: boolean;
+      persistHistoryMax: number;
+      approvalEnabled: boolean;
+      approvalTimeoutSec: number;
+      reactionEnabled: boolean;
+      reactionEmojiQq: string;
+      reactionEmojiDiscord: string;
+      privateReactionFallbackText: boolean;
+      privateReceiptText: string;
+    };
+    peakValley: {
+      groups: number[];
+      mode: string;
+      time: {
+        start: string;
+        end: string;
+        days: string[];
+        mode: string;
+        msg: string;
+      }[];
+      peak_msg: string;
+      valley_msg: string;
+      cmd_peak_msg: string;
+      cmd_valley_msg: string;
+    };
+  };
+  mcpServers: McpSpec[];
 }
 export type ConfigSource = () => SynapseConfig;
 export type ErrorSink = (error: Error) => void;

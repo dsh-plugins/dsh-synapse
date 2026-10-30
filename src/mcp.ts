@@ -15,7 +15,9 @@ export class McpManager {
   }
   async connect(name) {
     if (this.closed) throw new Error("MCP 已关闭");
-    const spec = this.config().mcp.find((x) => x.name === name && x.enabled);
+    const spec = this.config().mcpServers.find(
+      (x) => x.name === name && x.enabled,
+    );
     if (!spec) throw new Error("MCP 服务未启用");
     if (!this.connections.has(name))
       this.connections.set(
@@ -26,22 +28,32 @@ export class McpManager {
             spec.transport === "stdio"
               ? new StdioClientTransport({
                   command: spec.command,
-                  args: JSON.parse(spec.argsJson),
+                  args: spec.args,
                   env: {
                     PATH: process.env.PATH ?? "",
                     ...(process.env.SystemRoot
                       ? { SystemRoot: process.env.SystemRoot }
                       : {}),
-                    ...JSON.parse(spec.envJson),
+                    ...Object.fromEntries(
+                      spec.env.map((e) => [e.name, e.value]),
+                    ),
                   },
                   stderr: "ignore",
                 })
               : spec.transport === "sse"
                 ? new SSEClientTransport(new URL(spec.url), {
-                    requestInit: { headers: JSON.parse(spec.headersJson) },
+                    requestInit: {
+                      headers: Object.fromEntries(
+                        spec.headers.map((e) => [e.name, e.value]),
+                      ),
+                    },
                   })
                 : new StreamableHTTPClientTransport(new URL(spec.url), {
-                    requestInit: { headers: JSON.parse(spec.headersJson) },
+                    requestInit: {
+                      headers: Object.fromEntries(
+                        spec.headers.map((e) => [e.name, e.value]),
+                      ),
+                    },
                   });
           try {
             await client.connect(transport, { timeout: 15000 });
@@ -75,8 +87,8 @@ export class McpManager {
   }
   async available(): Promise<AvailableTool[]> {
     const result: AvailableTool[] = [];
-    for (const spec of this.config().mcp.filter((s) => s.enabled)) {
-      const allowed = new Set(spec.allowedTools.split(/\s+/).filter(Boolean));
+    for (const spec of this.config().mcpServers.filter((s) => s.enabled)) {
+      const allowed = new Set(spec.allowedTools);
       if (!allowed.size) continue;
       for (const tool of await this.list(spec.name))
         if (allowed.has(tool.name))
@@ -90,16 +102,16 @@ export class McpManager {
     }
     return result;
   }
-  async call(tool, args) {
-    const spec = this.config().mcp.find(
+  async call(tool, args, signal?: AbortSignal) {
+    const spec = this.config().mcpServers.find(
       (s) => s.name === tool.server && s.enabled,
     );
-    if (!spec?.allowedTools.split(/\s+/).includes(tool.rawName))
+    if (!spec?.allowedTools.includes(tool.rawName))
       throw new Error("工具不在允许列表");
     return (await this.connect(tool.server)).callTool(
       { name: tool.rawName, arguments: args },
       undefined,
-      { timeout: 60000 },
+      { timeout: 60000, signal },
     );
   }
   async close() {

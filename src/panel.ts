@@ -79,20 +79,24 @@ async function saveConfig() {
   view = saved.value;
   draft = structuredClone(view.value);
   dirty = false;
+  await render();
   notify("已保存。通道正在重新连接；可刷新状态检查结果。");
 }
-function field(parent, f, obj, key = f.key) {
+function field(parent, f, obj, key = f.key, path: string[] = []) {
+  const at = f.type === "group" ? path : [...path, String(key)];
   if (f.type === "group" || f.type === "object") {
     const box = node("fieldset");
     box.append(node("legend", f.label));
+    box.dataset.path = at.join(".");
     parent.append(box);
     const target = f.type === "object" ? (obj[key] ??= {}) : obj;
-    for (const child of f.fields) field(box, child, target);
+    for (const child of f.fields) field(box, child, target, child.key, at);
     return;
   }
   if (f.type === "array") {
     const box = node("fieldset");
     box.append(node("legend", f.label));
+    box.dataset.path = at.join(".");
     parent.append(box);
     const list = node("div");
     box.append(list);
@@ -100,7 +104,13 @@ function field(parent, f, obj, key = f.key) {
       list.replaceChildren();
       (obj[key] ||= []).forEach((_, i) => {
         const row = node("div", undefined, { className: "row" });
-        field(row, { ...f.item, label: `第 ${i + 1} 项` }, obj[key], i);
+        field(
+          row,
+          { ...f.item, label: `${f.item.label} ${i + 1}` },
+          obj[key],
+          i,
+          at,
+        );
         row.append(
           button("删除", () => {
             obj[key].splice(i, 1);
@@ -131,6 +141,25 @@ function field(parent, f, obj, key = f.key) {
       obj[key] = control.checked;
       dirty = true;
     };
+  } else if (f.type === "multiselect") {
+    control = node("select", undefined, {
+      multiple: true,
+      size: f.options.length,
+    });
+    for (const opt of f.options)
+      control.append(
+        node("option", opt.label, {
+          value: opt.value,
+          selected: (obj[key] || []).includes(opt.value),
+        }),
+      );
+    control.onchange = () => {
+      obj[key] = Array.from(
+        control.selectedOptions,
+        (option: HTMLOptionElement) => option.value,
+      );
+      dirty = true;
+    };
   } else if (f.type === "select") {
     control = node("select");
     for (const opt of f.options)
@@ -141,8 +170,7 @@ function field(parent, f, obj, key = f.key) {
       dirty = true;
     };
   } else {
-    const isJSON = String(key).toLowerCase().includes("json");
-    control = node(f.type === "textarea" || isJSON ? "textarea" : "input");
+    control = node(f.type === "textarea" ? "textarea" : "input");
     if (control.tagName === "INPUT")
       control.type =
         f.type === "password"
@@ -153,7 +181,9 @@ function field(parent, f, obj, key = f.key) {
     const secret = obj[key] && typeof obj[key] === "object";
     control.value = secret ? "" : (obj[key] ?? "");
     if (secret)
-      control.placeholder = "已保存（不回显）。留空保持不变；输入替换。";
+      control.placeholder = obj[key].set
+        ? "已保存（不回显）。留空保持不变；输入替换。"
+        : "尚未设置";
     control.oninput = () => {
       obj[key] = f.type === "number" ? Number(control.value) : control.value;
       dirty = true;
@@ -161,6 +191,7 @@ function field(parent, f, obj, key = f.key) {
     if (f.min !== undefined) control.min = f.min;
     if (f.max !== undefined) control.max = f.max;
   }
+  control.setAttribute("name", at.join("."));
   labeled(parent, f.label, control);
   if (f.description)
     parent.append(node("div", f.description, { className: "muted" }));
@@ -178,7 +209,7 @@ function defaultOf(f) {
   if (f.default !== undefined) return structuredClone(f.default);
   if (f.type === "object")
     return Object.fromEntries(f.fields.map((x) => [x.key, defaultOf(x)]));
-  if (f.type === "array") return [];
+  if (f.type === "array" || f.type === "multiselect") return [];
   if (f.type === "boolean") return false;
   if (f.type === "select") return f.options[0].value;
   if (f.type === "number") return f.min || 0;
@@ -191,34 +222,32 @@ async function configPanel(root, onlyMcp = false) {
       "p",
       onlyMcp
         ? "添加或修改 MCP 服务，保存后可预览工具。仅允许列表中的工具可被聊天自动调用。"
-        : "所有通道和上游功能均保存在当前 profile；保存使用修订号检查并发修改。",
+        : "按功能填写下方各项设置。聊天与审查使用 DSH 已配置的默认模型，保存后重新连接通道。",
     ),
   );
   for (const f of view.template.fields)
-    if (onlyMcp ? f.key === "mcp" : f.key !== "mcp") field(root, f, draft);
+    if (onlyMcp ? f.key === "mcpServers" : f.key !== "mcpServers")
+      field(root, f, draft);
   root.append(button("保存配置", saveConfig));
   if (!onlyMcp) {
     root.append(
-      button("载入上游功能 JSON 以预览 / 修改", async () => {
-        const rows = await api("features");
-        for (const row of rows) {
-          const f = draft.features.find((f) => f.id === row.id);
-          if (f) f.json = JSON.stringify(row.value, null, 2);
-        }
-        dirty = true;
+      button("同步聊天命令修改的功能设置", async () => {
+        if (
+          dirty &&
+          !confirm("当前修改尚未保存，同步将丢弃这些修改，是否继续？")
+        )
+          return;
+        await api("features/refresh", { expectedRevision: view.revision });
+        dirty = false;
         root.replaceChildren();
-        root.append(
-          node("p", "已载入当前功能配置，可能包含密钥。修改后保存。"),
-        );
-        for (const f of view.template.fields)
-          if (f.key !== "mcp") field(root, f, draft);
-        root.append(button("保存配置", saveConfig));
+        await configPanel(root);
+        notify("已同步当前功能设置，可继续在表单中修改。");
       }),
     );
   } else {
     const box = node("section");
     root.append(box);
-    for (const s of draft.mcp) {
+    for (const s of draft.mcpServers) {
       box.append(
         button(`预览 ${s.name} 工具`, async () => {
           preview.textContent = JSON.stringify(
@@ -297,7 +326,7 @@ async function skillPanel(root) {
       });
       revision = saved.revision;
       dirty = false;
-      notify("Skill 已保存，可被运行中的聊天检索。");
+      notify("Skill 已保存，可被对应通道的 DSH 任务检索。");
       await refresh();
     }),
     button("删除 Skill", async () => {

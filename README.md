@@ -16,7 +16,7 @@ npm pack
 
 在目标 DSH profile 安装 `@dsh-plugin/dsh-loader@next` 和本地生成的 `dsh-plugin-dsh-synapse-0.1.0.tgz`，然后按 DSH 的 bundle 安装流程加载。仓库提供 `cordis.patch.yml`。当前开发依赖固定到已发布的 `2.0.0-dev.41037890182`，peer range `^2.0.0-0` 同时接受 2.0 预发布与稳定版。
 
-在 DSH 插件配置中填写 OneBot 地址、访问令牌、模型 API，并启用机器人。管理面板入口位于 DSH 设置导航的 **Synapse · 通道与记忆**，也可在同一个已登录 DSH 域名打开 **`/synapse`**。自动 profile 定位失败时，在 loader 原生配置中填写 profile 绝对路径即可恢复。
+在 DSH 插件配置中填写 OneBot 地址、访问令牌，并启用机器人。聊天、GitHub 审查和 Skill 自总结直接使用 **DSH 宿主的原生 Agent 和当前默认模型**，模型由 DSH 自身的模型设置管理。管理面板入口位于 DSH 设置导航的 **Synapse · 通道与记忆**，也可在同一个已登录 DSH 域名打开 **`/synapse`**。自动 profile 定位失败时，在 loader 原生配置中填写 profile 绝对路径即可恢复。
 
 默认不开启机器人或 GitHub 发布操作。RAG 在首次实际使用时安装运行时并下载模型；启用机器人后会预热嵌入模型。无网络时，可预先填充相同目录结构的运行时和模型缓存。下载失败会明确报错，不会以随机向量代替本地模型。
 
@@ -27,37 +27,23 @@ npm pack
 | 上游模块 | Synapse 接入方式 |
 | --- | --- |
 | QQ 群聊、私聊、OneBot 事件 | 独立子进程运行完整 QQBot |
-| Discord 双向桥、图片附件、回复映射、`/send`、斜杠命令 | 保留原模块，使用 discord-bridge JSON 配置 |
-| Hermes 多模态、会话历史、表情回应、进度卡片、审批 | 本地 agent 实现 runs/SSE 协议；外部 Hermes 模式透传原有审批及工具能力 |
+| Discord 双向桥、图片附件、回复映射、`/send`、斜杠命令 | 保留原模块，在表单中添加服务器、频道与 QQ 群映射 |
+| Hermes 多模态、会话历史、表情回应、进度卡片、审批 | 内部 runs/SSE 适配层连接 DSH 原生 Agent；图片使用宿主附件服务，审批支持本次允许或拒绝 |
 | GitHub 订阅、富文本引用、绑定/白名单 | 签名通过的 Webhook 经 IPC 转发原模块 |
 | 群管理、黑名单、入群请求、欢迎语、戳一戳 | 保留原模块和配置 |
 | B 站订阅、Minecraft 查询、Modrinth、版本跟踪 | 保留原模块（上游默认未调度的任务保持原行为） |
 | 括号匹配、峰谷提醒、Markdown 图片渲染 | 保留原模块；峰谷配置也可从面板修改 |
 | `/help`、`/reload`、`/reboot`、`/shutdown` | 保留权限检查；重启交给父进程；关闭仅作用于机器人进程 |
 
-面板的「载入上游功能 JSON 以预览 / 修改」读取当前配置，可编辑全部上游参数。该操作可能显示 Token，请只在可信设备使用。普通 loader 配置接口会遮蔽密码。每个功能可单独编辑 JSON；配置修订号冲突返回错误并保留草稿。
+loader 原生配置与 Synapse 面板均使用逐项表单。群号、管理员、欢迎语、GitHub 订阅、Discord 映射、消息行为和峰谷提醒分别展开编辑；列表支持添加与删除，开关与时段使用对应控件。密码以不回显的凭据占位符保存，配置修订冲突会保留草稿。
 
-QQ 需在 `command.groups`、`hermes.groups` 等功能列表中添加群号。例如 Hermes：
+QQ 需在「命令入口」「QQ / Discord 消息行为」等功能下添加启用的群号。Discord 在「跨平台桥接」下填写 Bot Token，并逐条添加服务器 ID、频道名称、QQ 群号和转发条件。
 
-```json
-{"version":1,"groups":[123456],"requireMention":true,"forwardImages":true}
-```
-
-Discord 的 `discord-bridge` 示例（频道键为服务器 ID 和频道名称）：
-
-```json
-{
-  "version": 1,
-  "token": "YOUR_DISCORD_BOT_TOKEN",
-  "bridges": {
-    "123456789#general": {"group":"123456","need_reply":"false","need_cmd":"false"}
-  }
-}
-```
+升级时自动将旧 JSON 配置迁移到表单，合并上游配置文件中的生效值，并在 `<profile>/data/dsh-synapse/config-before-forms.json` 保留迁移前备份（可能包含旧凭据）。之后通过聊天命令调整的设置，可使用「同步聊天命令修改的功能设置」读回表单。
 
 Discord Bot 需要 Message Content Intent；斜杠命令需要 `applications.commands`。桥接群使用上游共享会话逻辑，QQ/Discord 使用同一聊天长期记忆库。OneBot 私聊/群聊和 Discord 的门控、管理员身份仍由上游执行。
 
-本地 AI 支持 OpenAI 兼容 `/chat/completions`。外部 Hermes 模式将请求代理到配置的 Hermes 地址，注入共享人设、记忆和匹配的 Skill，保留 SSE、停止与审批接口。外部 Hermes 使用自己的工具执行环境；面板配置的 MCP 自动调用用于 Synapse 本地 AI 模式。
+Synapse 为每次任务创建受宿主管理的 Agent，继承 DSH 的当前 provider、model 和推理设置，并注入对应提示词、记忆和 Skill。工具调用、策略检查、取消和会话生命周期由 DSH 执行。上游 Hermes 的消息协议仅在本机适配层使用；插件不提供额外的模型 API 或外部 harness 配置。升级前仅配置了插件独立模型的用户，需要在 DSH 的模型设置中选择默认模型。
 
 ## 提示词、记忆与 Skill
 
@@ -79,7 +65,7 @@ Discord Bot 需要 Message Content Intent；斜杠命令需要 `applications.com
 
 提示词每次请求读取，profile 文件优先，支持无需重启修改。Home 的 Skill 作为继承项，profile 同名项覆盖它。前端支持 Markdown 导入、纯文本安全预览、编辑、删除；写入使用修订摘要防止并发覆盖。自动生成的 `auto-chat-*` 和 `auto-review-*` Skill 使用相同目录与管理入口，分别用于对应通道。Skill 调用表现为检索适用操作步骤并加入当前推理上下文，不执行文档中任意脚本。
 
-聊天与审查记忆按 `chat` / `review` 分区。完成回答后可总结重要事项并提炼可复用 Skill，普通闲聊允许不生成内容。自动总结由配置的语言模型完成；生成结果可在面板检查。聊天记忆在当前 profile 的 QQ/Discord 通道间共享，请将需要彼此隔离的用户群部署到不同 profile。
+聊天与审查记忆按 `chat` / `review` 分区。完成回答后可通过 DSH 原生 Agent 总结重要事项并提炼可复用 Skill，普通闲聊允许不生成内容；生成结果可在面板检查。聊天记忆在当前 profile 的 QQ/Discord 通道间共享，请将需要彼此隔离的用户群部署到不同 profile。
 
 Hermes 导入支持普通 Markdown、frontmatter、标题分节、代码块和长段分块。导入前可以预览，再选择聊天或审查分类；批量嵌入成功后以事务提交，相同分类和内容去重。未知 Hermes 私有方言作为普通 Markdown 保留，不会猜测不存在的结构字段。
 
@@ -96,7 +82,7 @@ Hermes 导入支持普通 Markdown、frontmatter、标题分节、代码块和�
 
 ## MCP
 
-面板支持 stdio、Streamable HTTP、SSE 服务，参数、环境变量和请求头均持久化。可以增删、修改配置并预览实际工具列表（含分页）。只有管理员在「允许自动调用的工具名称」中逐行列出的工具会进入本地聊天工具循环。空列表不自动调用任何工具。GitHub 审查不执行 MCP 工具。
+面板支持 stdio、Streamable HTTP、SSE 服务，参数逐项填写，环境变量和请求头使用名称/值表单并持久化。可以增删、修改配置并预览实际工具列表（含分页）。只有管理员在「允许自动调用的工具名称」列表中添加的工具会注册到对应 DSH Agent 的作用域，由宿主工具执行器调用。空列表不自动调用任何工具；外部聊天不继承宿主全局工具。GitHub 审查不执行 MCP 工具。
 
 stdio 服务以当前用户权限运行，其环境默认仅继承 PATH / SystemRoot 及显式配置值。MCP 与自动学习的 Skill 相互独立：Skill 不能扩大工具允许列表。
 
@@ -116,6 +102,8 @@ npm test
 npm pack --dry-run
 # 可选：实际下载模型，产生的 .runtime-test 被 Git 忽略
 node scripts/model-smoke.mjs --rerank
+# 可选：使用已安装的 DSH 组件验证原生 Agent（模型输出使用内存测试桩）
+node scripts/host-smoke.mjs /path/to/installed/dsh/package.json
 ```
 
 自动测试使用真实 SQLite/vec、模拟 OneBot、实际 MCP stdio 服务和 DOM 管理面板，测试不向真实账号发送消息。跨平台 CI 覆盖 Windows、Linux、macOS。真实 QQ/Discord、GitHub 发布以及浏览器图片渲染仍需部署者提供凭据和浏览器后联调。

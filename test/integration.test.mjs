@@ -23,18 +23,19 @@ const waitFor = async (fn, ms = 10000) => {
 };
 test("real MCP stdio discovery, allowlist and invocation", async () => {
   const c = defaultsFor(template.fields);
-  c.mcp = [
+  c.mcpServers = [
     {
       name: "fixture",
       enabled: true,
       transport: "stdio",
       command: process.execPath,
-      argsJson: JSON.stringify([
+      args: [
         fileURLToPath(new URL("./fixtures/mcp-server.mjs", import.meta.url)),
-      ]),
-      envJson: "{}",
-      headersJson: "{}",
-      allowedTools: "read",
+      ],
+      env: [],
+      headers: [],
+      allowedTools: ["read"],
+      url: "",
     },
   ];
   const mcp = new McpManager(() => c);
@@ -66,12 +67,8 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
     profileDir: profile,
     homeDir: home,
   };
-  c.features.find((x) => x.id === "command").json = JSON.stringify({
-    version: 1,
-    groups: [123],
-  });
-  c.features.find((x) => x.id === "hermes").json = JSON.stringify({
-    version: 1,
+  c.modules.command.groups = [123];
+  Object.assign(c.modules.chat, {
     groups: [123],
     reactionEnabled: false,
     progressAsImage: false,
@@ -209,6 +206,7 @@ test("loader 2.0 lifecycle registers, authenticates routes and disposes services
           registered = t;
           return {
             get: () => ({ value: c }),
+            dispose() {},
             watch(fn) {
               watched = fn;
               return () => {

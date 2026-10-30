@@ -14,6 +14,7 @@ import {
   repositoryAllowed,
   Reviews,
 } from "../lib/host/github.js";
+import { hostFixture } from "./fixtures/host.mjs";
 import { Agent } from "../lib/host/agent.js";
 import { Gateway } from "../lib/host/gateway.js";
 import { browserAuthorized } from "../lib/host/http.js";
@@ -39,10 +40,10 @@ const inference = {
     return docs.map((t) => (t.includes("重排") ? 1 : 0));
   },
 };
-test("defaults form valid config and reject malformed JSON / duplicate MCP", () => {
+test("defaults form valid config and reject invalid structured fields", () => {
   const c = config();
   assert.equal(validateConfig(c), c);
-  assert.throws(() => validateConfig({ ...c, botJson: "[]" }));
+  assert.throws(() => validateConfig({ ...c, mcpServers: [{ name: "x" }] }));
   assert.throws(() => validateConfig({ ...c, githubEnabled: true }));
   assert.throws(() => validateConfig({ ...c, recallK: 1.5 }));
 });
@@ -171,7 +172,22 @@ test("agent injects SOUL, retrieved skill and memory; tools execute only in chat
   await writeFile(path.join(p.profile, "SOUL.md"), "shared soul");
   const c = { ...config(), learnSkills: false, learnMemory: false };
   let calls = 0;
+  const host = hostFixture(
+    async ({ variables, tools, restrictions, options }) => {
+      assert.deepEqual(restrictions, [{ allow: [] }]);
+      assert.equal(options.agentOptions.model, "configured-model");
+      assert.match(
+        variables.get("synapse_context")(),
+        /shared soul|Review changes/,
+      );
+      assert.match(variables.get("synapse_context")(), /durable/);
+      if (tools.length)
+        await tools[0].execute({}, { signal: new AbortController().signal });
+      return "done";
+    },
+  );
   const a = new Agent({
+    loader: host.loader,
     paths: p,
     config: () => c,
     memory: { search: async () => [{ text: "durable", source: "test" }] },
@@ -191,24 +207,12 @@ test("agent injects SOUL, retrieved skill and memory; tools execute only in chat
       },
     },
   });
-  let rounds = 0;
-  a.completion = async (messages) => {
-    assert.match(messages[0].content, /shared soul|Review changes/);
-    assert.match(messages[0].content, /durable/);
-    return rounds++ === 0
-      ? {
-          role: "assistant",
-          tool_calls: [
-            { id: "a", function: { name: "mcp_0", arguments: "{}" } },
-          ],
-        }
-      : { role: "assistant", content: "done" };
-  };
   assert.equal(await a.run("question"), "done");
   assert.equal(calls, 1);
-  rounds = 1;
   assert.equal(await a.run("question", "review"), "done");
   assert.equal(calls, 1);
+  assert.equal(host.disposed.length, 2);
+  await a.close();
 });
 test("Gateway authenticates, serves replayable completion events, and stops runs", async () => {
   const g = new Gateway({ run: async () => "hello" }, config, () => {});
@@ -230,6 +234,68 @@ test("Gateway authenticates, serves replayable completion events, and stops runs
     ).text();
     assert.match(events, /run.completed/);
     assert.match(events, /hello/);
+  } finally {
+    await g.close();
+  }
+});
+test("Gateway routes single-use DSH approval and cancels pending approval on stop", async () => {
+  const g = new Gateway(
+    {
+      run: async (
+        _input,
+        _channel,
+        _history,
+        signal,
+        _event,
+        _instructions,
+        ask,
+      ) => ask({ toolName: "docs/read", signal }),
+    },
+    config,
+    () => {},
+  );
+  await g.start();
+  const headers = {
+    Authorization: `Bearer ${g.token}`,
+    "Content-Type": "application/json",
+  };
+  const post = (url, value = {}) =>
+    fetch(g.url + url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(value),
+    });
+  try {
+    const { run_id: first } = await (
+      await post("/v1/runs", { input: "read" })
+    ).json();
+    assert.equal(
+      (await post(`/v1/runs/${first}/approval`, { choice: "always" })).status,
+      400,
+    );
+    assert.equal(
+      (await post(`/v1/runs/${first}/approval`, { choice: "once" })).status,
+      200,
+    );
+    const events = await (
+      await fetch(g.url + `/v1/runs/${first}/events`, { headers })
+    ).text();
+    assert.match(events, /approval.request/);
+    assert.match(events, /allowed-once/);
+    assert.equal(
+      (await post(`/v1/runs/${first}/approval`, { choice: "once" })).status,
+      409,
+    );
+    const { run_id: second } = await (
+      await post("/v1/runs", { input: "read" })
+    ).json();
+    await post(`/v1/runs/${second}/stop`);
+    assert.match(
+      await (
+        await fetch(g.url + `/v1/runs/${second}/events`, { headers })
+      ).text(),
+      /cancelled/,
+    );
   } finally {
     await g.close();
   }

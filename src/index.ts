@@ -1,6 +1,8 @@
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { template, validateConfig } from "./config.js";
+import { registerConfig } from "./config-migration.js";
+import { modulesFromFiles } from "./feature-config.js";
 import { pathsFor, SkillStore, safePath } from "./files.js";
 import { Inference } from "./runtime.js";
 import { Memory, parseHermes } from "./memory.js";
@@ -32,7 +34,15 @@ export async function createService(
       config,
     ),
     mcp = new McpManager(config);
-  const agent = new Agent({ config, paths, memory, skills, mcp, onError }),
+  const agent = new Agent({
+      loader: ctx.dshLoader,
+      config,
+      paths,
+      memory,
+      skills,
+      mcp,
+      onError,
+    }),
     gateway = new Gateway(agent, config, onError);
   const bot = new Bot(paths, config, gateway, onError),
     reviews = new Reviews(memory.db, agent, config, bot, onError);
@@ -41,6 +51,7 @@ export async function createService(
       reviews.close(),
       bot.stop(),
       gateway.close(),
+      agent.close(),
       mcp.close(),
       inference.close(),
     ]);
@@ -71,10 +82,7 @@ export async function createService(
   };
 }
 export async function apply(ctx: SynapseContext) {
-  const handle = await ctx.dshLoader.config.register<SynapseConfig>(
-    ctx,
-    template,
-  );
+  const handle = await registerConfig(ctx);
   let service,
     disposed = false,
     lastError = "",
@@ -129,21 +137,20 @@ export async function apply(ctx: SynapseContext) {
             res,
             service.memory.list(url.searchParams.get("channel") || "chat"),
           );
-        if (req.method === "GET" && action === "features") {
-          const live = await service.bot.liveFeatures();
-          return json(
-            res,
-            service.config().features.map((f) => ({
-              id: f.id,
-              value: {
-                ...JSON.parse(f.json),
-                ...(live.find((x) => x.id === f.id)?.value || {}),
-              },
-            })),
-          );
-        }
         if (req.method === "POST") {
           const data = JSON.parse((await body(req)).toString() || "{}");
+          if (action === "features/refresh") {
+            const current = handle.get();
+            if (current.revision !== data.expectedRevision)
+              return json(res, { error: "配置已变更，请重新载入后同步" }, 409);
+            const modules = modulesFromFiles(
+              current.value.modules,
+              await service.bot.liveFeatures(),
+            );
+            validateConfig({ ...current.value, modules });
+            await handle.update({ modules }, current.revision);
+            return json(res, { ok: true });
+          }
           if (action === "skills/save")
             return json(
               res,

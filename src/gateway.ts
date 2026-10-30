@@ -1,10 +1,8 @@
 import type { ConfigSource, ErrorSink } from "./types.js";
 import { createServer } from "node:http";
 import { randomUUID, randomBytes } from "node:crypto";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import { StringDecoder } from "node:string_decoder";
 import { body, json, equalSecret } from "./http.js";
+import type { ApprovalAnswer } from "./harness.js";
 interface Run {
   created: number;
   events: any[];
@@ -12,6 +10,8 @@ interface Run {
   done: boolean;
   controller: AbortController;
   task?: Promise<void>;
+  approval?: (answer: ApprovalAnswer) => void;
+  approvalQueue: Promise<unknown>;
 }
 export class Gateway {
   agent: import("./agent.js").Agent;
@@ -19,8 +19,6 @@ export class Gateway {
   onError: ErrorSink;
   token: string;
   runs: Map<string, Run>;
-  external: Map<string, { input: any; created: number }>;
-  controllers: Set<AbortController>;
   closed: boolean;
   server: import("node:http").Server;
   url: string;
@@ -36,8 +34,6 @@ export class Gateway {
     Object.assign(this, { agent, config, onError });
     this.token = randomBytes(32).toString("hex");
     this.runs = new Map();
-    this.external = new Map();
-    this.controllers = new Set();
     this.closed = false;
   }
   async start() {
@@ -58,8 +54,6 @@ export class Gateway {
     this.gc = setInterval(() => {
       for (const [id, run] of this.runs)
         if (run.done && Date.now() - run.created > 600000) this.runs.delete(id);
-      for (const [id, run] of this.external)
-        if (Date.now() - run.created > 3600000) this.external.delete(id);
     }, 60000).unref();
   }
   async handle(req, res) {
@@ -73,7 +67,6 @@ export class Gateway {
     )
       return json(res, { error: "Not found" }, 404);
     const c = this.config();
-    if (c.externalHermes) return this.proxy(req, res, url.pathname, c);
     if (url.pathname === "/v1/runs" && req.method === "POST") {
       if (
         [...this.runs.values()].filter((r) => !r.done).length >= 16 ||
@@ -89,6 +82,7 @@ export class Gateway {
         listeners: new Set(),
         done: false,
         controller,
+        approvalQueue: Promise.resolve(),
       };
       this.runs.set(id, run);
       const emit = (event, payload) => {
@@ -110,6 +104,9 @@ export class Gateway {
           controller.signal,
           emit,
           data.instructions || "",
+          c.modules.chat.approvalEnabled
+            ? (request) => this.askApproval(run, request, emit)
+            : undefined,
         )
         .then(
           (output) => emit("run.completed", { output }),
@@ -150,113 +147,50 @@ export class Gateway {
       run.controller.abort();
       return json(res, { ok: true });
     }
-    return json(
-      res,
-      { error: "本地模式仅执行管理员允许的 MCP 工具，无待审批请求" },
-      409,
-    );
-  }
-  async proxy(req, res, pathname, c) {
-    let payload;
-    const controller = new AbortController();
-    this.controllers.add(controller);
-    res.on("close", () => controller.abort());
-    try {
-      if (req.method === "POST")
-        payload = JSON.parse((await body(req)).toString() || "{}");
-      const input = payload?.input;
-      if (pathname === "/v1/runs")
-        payload.instructions =
-          (await this.agent.context(input, "chat")) +
-          "\n\n" +
-          (payload.instructions || "");
-      const upstream = await fetch(c.hermesUrl.replace(/\/$/, "") + pathname, {
-        method: req.method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${c.hermesKey}`,
-        },
-        body: payload ? JSON.stringify(payload) : undefined,
-        signal: AbortSignal.any([
-          controller.signal,
-          AbortSignal.timeout(c.timeoutSec * 1000),
-        ]),
-      });
-      if (pathname === "/v1/runs") {
-        const result = await upstream.json();
-        if (upstream.ok)
-          this.external.set(result.run_id || result.id, {
-            input,
-            created: Date.now(),
-          });
-        return json(res, result, upstream.status);
-      }
-      res.writeHead(upstream.status, {
-        "Content-Type":
-          upstream.headers.get("content-type") || "application/json",
-        "Cache-Control": "no-store",
-      });
-      if (pathname.endsWith("/events") && upstream.ok) {
-        let buffer = "",
-          eventName = "";
-        const decoder = new StringDecoder("utf8");
-        const id = pathname.split("/")[3];
-        for await (const chunk of Readable.fromWeb(
-          upstream.body as unknown as import("node:stream/web").ReadableStream,
-        )) {
-          res.write(chunk);
-          buffer += decoder.write(chunk);
-          let end;
-          while ((end = buffer.indexOf("\n")) >= 0) {
-            const line = buffer.slice(0, end).trim();
-            buffer = buffer.slice(end + 1);
-            if (line.startsWith("event:")) {
-              eventName = line.slice(6).trim();
-              continue;
-            }
-            if (!line.startsWith("data:")) continue;
-            let event;
-            try {
-              event = JSON.parse(line.slice(5));
-            } catch {
-              continue;
-            }
-            if (
-              event.event === "run.completed" ||
-              event.type === "run.completed" ||
-              eventName === "run.completed"
-            ) {
-              const run = this.external.get(id);
-              this.external.delete(id);
-              if (run) {
-                const task = this.agent
-                  .learn(
-                    typeof run.input === "string"
-                      ? run.input
-                      : JSON.stringify(run.input),
-                    event.output || "",
-                    "chat",
-                    this.shutdown.signal,
-                  )
-                  .catch(this.onError);
-                this.background.add(task);
-                void task.finally(() => this.background.delete(task));
-              }
-            }
-            eventName = "";
-          }
-        }
-        res.end();
-      } else
-        await pipeline(
-          Readable.fromWeb(
-            upstream.body as unknown as import("node:stream/web").ReadableStream,
-          ),
+    if (action === "approval" && req.method === "POST") {
+      const { choice } = JSON.parse((await body(req)).toString());
+      if (!["once", "deny"].includes(choice))
+        return json(
           res,
+          { error: "DSH 审批仅对本次操作生效，请选择 once 或 deny" },
+          400,
         );
-    } finally {
-      this.controllers.delete(controller);
+      if (!run.approval) return json(res, { error: "当前没有待审批请求" }, 409);
+      run.approval(choice === "once" ? "allowed-once" : "rejected");
+      return json(res, { ok: true });
     }
+    return json(res, { error: "Method not allowed" }, 405);
+  }
+  private askApproval(run: Run, request, emit): Promise<ApprovalAnswer> {
+    const task = run.approvalQueue.then(
+      () =>
+        new Promise<ApprovalAnswer>((resolve) => {
+          const signal = AbortSignal.any([
+            run.controller.signal,
+            ...(request.signal ? [request.signal] : []),
+          ]);
+          if (signal.aborted) return resolve("cancelled");
+          let timer: NodeJS.Timeout;
+          const finish = (answer: ApprovalAnswer) => {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", abort);
+            if (run.approval === finish) run.approval = undefined;
+            resolve(answer);
+          };
+          const abort = () => finish("cancelled");
+          run.approval = finish;
+          signal.addEventListener("abort", abort, { once: true });
+          const seconds = this.config().modules.chat.approvalTimeoutSec;
+          if (seconds > 0)
+            timer = setTimeout(() => finish("rejected"), seconds * 1000);
+          emit("approval.request", {
+            command: request.toolName,
+            description: `${request.reason || "DSH 工具操作"}（仅支持本次允许 once / 拒绝 deny）`,
+          });
+        }),
+    );
+    run.approvalQueue = task.catch(() => {});
+    return task;
   }
   async close() {
     this.closed = true;
@@ -265,7 +199,6 @@ export class Gateway {
     for (const run of this.runs.values()) {
       run.controller.abort();
     }
-    for (const c of this.controllers) c.abort();
     this.server?.closeAllConnections();
     await new Promise<void>((resolve) =>
       this.server ? this.server.close(() => resolve()) : resolve(),

@@ -1,43 +1,31 @@
-import { defineConfig, type ConfigField } from "@dsh-plugin/dsh-loader/config";
-const text = (
-  key,
-  label,
-  value = "",
-  type: ConfigField["type"] = "text",
-): ConfigField => ({ type, key, label, default: value });
-const flag = (key, label, value = false): ConfigField => ({
-  type: "boolean",
-  key,
-  label,
-  default: value,
-});
-const num = (
-  key,
-  label,
-  value: number,
-  min: number,
-  max: number,
-): ConfigField => ({ type: "number", key, label, default: value, min, max });
-export const FEATURES = [
-  "management",
-  "parentheses",
-  "poke",
-  "minecraft",
-  "modrinth",
-  "bili",
-  "command",
-  "github",
-  "welcome",
-  "discord-bridge",
-  "hermes",
-  "peak-valley-timer",
-];
+import { defineConfig, validateValues } from "@dsh-plugin/dsh-loader/config";
+import type { ConfigField } from "@dsh-plugin/dsh-loader/config";
+import type { SynapseConfig } from "./types.js";
+import {
+  text,
+  flag,
+  num,
+  object,
+  array,
+  strings,
+  select,
+  moduleFields,
+} from "./feature-config.js";
+const pairs = (key: string, label: string) =>
+  array(
+    key,
+    label,
+    object("item", "条目", [
+      text("name", "名称"),
+      text("value", "值", "", "password"),
+    ]),
+  );
 export const template = defineConfig({
   id: "dsh-synapse",
   packageName: "@dsh-plugin/dsh-synapse",
   title: "Synapse · 通道与记忆",
   description:
-    "保存后重新连接通道。Skill、MCP、Hermes 导入位于 Synapse 管理面板。密码仅保存在当前 profile。",
+    "聊天、审查和自总结使用当前 DSH 的默认模型与 Agent 运行时。各功能在下方直接配置；Skill、MCP 工具预览与记忆导入位于 Synapse 管理面板。",
   fields: [
     flag("enabled", "启用机器人"),
     text("profileDir", "当前 profile 绝对路径（自动定位失败时填写）"),
@@ -50,27 +38,28 @@ export const template = defineConfig({
         text("wsUrl", "WebSocket 地址", "ws://127.0.0.1:3001"),
         text("httpToken", "HTTP Token", "", "password"),
         text("wsToken", "WS Token", "", "password"),
+        text("tokenParams", "WebSocket Token 查询参数前缀", "?access_token="),
         text("chromePath", "Chrome / Chromium 路径"),
-        text("botJson", "上游 bot-config 扩展 JSON", "{}", "textarea"),
+        text("userAgent", "HTTP User-Agent", "Mozilla/5.0"),
+        select("logLevel", "日志级别", [
+          ["info", "信息"],
+          ["warn", "警告"],
+          ["error", "错误"],
+          ["debug", "调试"],
+        ]),
       ],
     },
     {
       type: "group",
-      label: "AI 对话 / 审查",
+      label: "任务运行限制",
       fields: [
-        text("llmUrl", "OpenAI 兼容 API 地址", "https://api.deepseek.com/v1"),
-        text("llmKey", "API Key", "", "password"),
-        text("model", "模型", "deepseek-chat"),
-        num("timeoutSec", "请求超时（秒）", 120, 5, 600),
-        num("maxToolRounds", "工具轮数上限", 6, 1, 20),
-        flag("externalHermes", "使用外部 Hermes（保留其工具及审批）"),
-        text("hermesUrl", "Hermes API 地址", "http://127.0.0.1:8642"),
-        text("hermesKey", "Hermes Key", "", "password"),
+        num("timeoutSec", "单次任务超时（秒）", 120, 5, 600),
+        num("maxToolRounds", "单次任务最大步骤数", 6, 1, 20),
       ],
     },
     {
       type: "group",
-      label: "GitHub",
+      label: "GitHub Webhook",
       fields: [
         flag("githubEnabled", "启用 Webhook 审查"),
         text("githubToken", "GitHub Token", "", "password"),
@@ -98,120 +87,95 @@ export const template = defineConfig({
         num("maxMemories", "最大记忆条数", 20000, 100, 1000000),
       ],
     },
-    {
-      type: "array",
-      key: "features",
-      label: "gugle-chat-bot 全量功能配置（JSON）",
-      default: FEATURES.map((id) => ({
-        id,
-        json: JSON.stringify(
-          id === "github"
-            ? { version: 2, groups: {} }
-            : id === "welcome"
-              ? { version: 1, welcomes: [] }
-              : id === "discord-bridge"
-                ? { version: 1, token: "", bridges: {} }
-                : { version: 1, groups: [] },
-          null,
-          2,
-        ),
-      })),
-      item: {
-        type: "object",
-        label: "功能",
-        fields: [
-          {
-            type: "select",
-            key: "id",
-            label: "模块",
-            options: FEATURES.map((value) => ({ label: value, value })),
-          },
-          text("json", "配置 JSON（可能含密钥）", "{}", "password"),
-        ],
-      },
-    },
-    {
-      type: "array",
-      key: "mcp",
-      label: "MCP 服务",
-      item: {
-        type: "object",
-        label: "服务",
-        fields: [
-          text("name", "名称"),
-          flag("enabled", "启用", true),
-          {
-            type: "select",
-            key: "transport",
-            label: "传输",
-            options: [
-              { label: "stdio", value: "stdio" },
-              { label: "Streamable HTTP", value: "http" },
-              { label: "SSE", value: "sse" },
-            ],
-          },
-          text("command", "命令"),
-          text("argsJson", "参数 JSON", "[]", "textarea"),
-          text("envJson", "环境变量 JSON", "{}", "password"),
-          text("url", "URL"),
-          text("headersJson", "HTTP 请求头 JSON", "{}", "password"),
-          text(
-            "allowedTools",
-            "允许自动调用的工具名称（每行一个）",
-            "",
-            "textarea",
-          ),
-        ],
-      },
-    },
-  ],
+    object("modules", "聊天与通知功能", moduleFields),
+    array(
+      "mcpServers",
+      "MCP 服务",
+      object("item", "服务", [
+        {
+          type: "text",
+          key: "name",
+          label: "名称",
+          required: true,
+          pattern: "^[a-zA-Z0-9_-]{1,32}$",
+        },
+        flag("enabled", "启用", true),
+        select("transport", "传输", [
+          ["stdio", "stdio"],
+          ["http", "Streamable HTTP"],
+          ["sse", "SSE"],
+        ]),
+        text("command", "启动命令"),
+        strings("args", "命令参数（每项一个参数）"),
+        pairs("env", "环境变量"),
+        text("url", "服务 URL"),
+        pairs("headers", "HTTP 请求头"),
+        strings("allowedTools", "允许自动调用的工具名称"),
+      ]),
+    ),
+  ] satisfies ConfigField[],
 });
-export function parseObject(raw) {
-  const value = JSON.parse(raw);
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new Error("需要 JSON 对象");
-  return value;
-}
-export function validateConfig(c) {
-  parseObject(c.botJson);
-  const ids = new Set();
-  for (const f of c.features) {
-    if (!FEATURES.includes(f.id) || ids.has(f.id))
-      throw new Error("功能 ID 无效或重复");
-    ids.add(f.id);
-    parseObject(f.json);
-  }
-  const names = new Set();
-  for (const s of c.mcp) {
-    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(s.name) || names.has(s.name))
-      throw new Error("MCP 名称无效或重复");
-    names.add(s.name);
-    const args = JSON.parse(s.argsJson);
-    if (!Array.isArray(args) || args.some((x) => typeof x !== "string"))
-      throw new Error("MCP 参数必须是字符串数组");
-    for (const raw of [s.envJson, s.headersJson])
-      if (Object.values(parseObject(raw)).some((x) => typeof x !== "string"))
-        throw new Error("MCP 环境变量和请求头必须是字符串");
+
+export function validateConfig(c: SynapseConfig) {
+  validateValues(template.fields, c as any);
+  const unique = (values: string[], label: string) => {
+    if (new Set(values).size !== values.length)
+      throw new Error(`${label}不能重复`);
+  };
+  unique(
+    c.mcpServers.map((s) => s.name),
+    "MCP 名称",
+  );
+  for (const s of c.mcpServers) {
+    for (const [entries, label] of [
+      [s.env, "环境变量"],
+      [s.headers, "HTTP 请求头"],
+    ] as const) {
+      unique(
+        entries.map((e) => e.name.toLowerCase()),
+        label,
+      );
+      if (entries.some((e) => !e.name || /[\r\n=]/.test(e.name)))
+        throw new Error(`${label}名称无效`);
+    }
+    if (s.enabled && s.transport === "stdio" && !s.command.trim())
+      throw new Error("MCP 启动命令不能为空");
     if (s.transport !== "stdio" && !/^https?:\/\//.test(s.url))
       throw new Error("MCP URL 无效");
   }
+  unique(
+    c.modules.discord.bridges.map((b) => `${b.guildId}#${b.channelName}`),
+    "Discord 频道映射",
+  );
+  for (const b of c.modules.discord.bridges)
+    if (
+      !/^\d+$/.test(b.guildId) ||
+      !/^\d+$/.test(b.group) ||
+      !b.channelName.trim()
+    )
+      throw new Error("Discord 桥接需要服务器 ID、频道名称和 QQ 群号");
+  unique(
+    c.modules.github.subscriptions.map((s) => s.repository.toLowerCase()),
+    "GitHub 订阅仓库",
+  );
+  for (const s of c.modules.github.subscriptions)
+    if (!/^[\w.-]+\/[\w.-]+$/.test(s.repository))
+      throw new Error("GitHub 订阅仓库格式应为 owner/repo");
   if (
     c.githubEnabled &&
     (!c.webhookSecret || !c.githubToken || !c.repositories.trim())
   )
     throw new Error("启用 GitHub 需要 Secret、Token 和仓库允许列表");
-  for (const k of [
-    "recallK",
-    "memoryK",
-    "maxMemories",
-    "maxToolRounds",
-    "timeoutSec",
-    "maxDiffChars",
-  ])
-    if (!Number.isInteger(c[k])) throw new Error(`${k} 必须是整数`);
-  for (const key of ["httpUrl", "llmUrl", "hermesUrl"])
-    if (!/^https?:\/\//.test(c[key]))
-      throw new Error(`${key} 必须是 HTTP(S) URL`);
-  if (!/^wss?:\/\//.test(c.wsUrl)) throw new Error("wsUrl 必须是 WS(S) URL");
+  const integers = (value: unknown) => {
+    if (typeof value === "number" && !Number.isSafeInteger(value))
+      throw new Error("数量和号码必须是安全整数");
+    if (value && typeof value === "object")
+      Object.values(value).forEach(integers);
+  };
+  integers(c);
+  if (!/^https?:\/\//.test(c.httpUrl))
+    throw new Error("HTTP 地址必须是 HTTP(S) URL");
+  if (!/^wss?:\/\//.test(c.wsUrl))
+    throw new Error("WebSocket 地址必须是 WS(S) URL");
   return c;
 }

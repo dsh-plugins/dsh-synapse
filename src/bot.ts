@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { once } from "node:events";
 import { atomicWrite } from "./files.js";
+import { featureFiles } from "./feature-config.js";
 export class Bot {
   paths: PluginPaths;
   config: ConfigSource;
@@ -37,18 +38,18 @@ export class Bot {
       path.join(cwd, "src"),
       { recursive: true },
     );
-    const base = JSON.parse(c.botJson);
     await atomicWrite(
       path.join(cwd, "configs", "bot-config.json"),
       JSON.stringify({
-        ...base,
+        userAgent: c.userAgent,
+        tokenParams: c.tokenParams,
         httpUrl: c.httpUrl,
         wsUrl: c.wsUrl,
         httpToken: c.httpToken,
         wsToken: c.wsToken,
         chromePath: c.chromePath,
         githubAllowedRepositories: c.repositories.split(/\s+/).filter(Boolean),
-        logLevel: base.logLevel || "info",
+        logLevel: c.logLevel,
       }),
     );
     // Existing feature files contain live /github subscribe and admin changes.
@@ -61,16 +62,17 @@ export class Bot {
       if (e.code !== "ENOENT") throw e;
     }
     const applied = {};
-    for (const f of c.features) {
-      applied[f.id] = f.json;
+    for (const f of featureFiles(c)) {
+      const serialized = JSON.stringify(f.value);
+      applied[f.id] = serialized;
       const file = path.join(
         cwd,
         "configs",
         ...(f.id === "peak-valley-timer" ? [] : ["features"]),
         `${f.id}.json`,
       );
-      let feature = JSON.parse(f.json);
-      if (previous[f.id] === f.json)
+      let feature = f.value;
+      if (previous[f.id] === serialized)
         try {
           feature = JSON.parse(await readFile(file, "utf8"));
         } catch (e) {
