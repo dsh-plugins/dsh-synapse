@@ -126,7 +126,7 @@ node scripts/model-smoke.mjs --rerank
 
 - PR 和手动运行：执行 Linux、Windows、macOS 的类型检查、构建、测试与打包检查。
 - 推送 `main`：三平台检查全部成功后，将 `X.Y.Z-dev.<GitHub run ID>` 发布到 npm 的 `next` 标签；重跑已发布的同一版本会跳过发布。
-- 推送 `vX.Y.Z` 标签：必须与 `package.json` 的稳定版本号完全一致，检查成功后发布到 `latest`，并将 npm 元数据写入 `npm-latest.json`、提交回 `main`。
+- 推送 `vX.Y.Z` 标签：必须与 `package.json` 的稳定版本号完全一致，检查成功后发布到 `latest`，并将 npm 元数据写入 `npm-latest.json`、提交回 `main`；遇到 registry 处理延迟时，每 30 秒重试，最多重试 10 次，并核对目标版本。
 
 开发版只在发布任务的临时检出中修改 `package.json` 和锁文件；仓库保持稳定的 `X.Y.Z` 基础版本。正式发布前先更新两个文件中的版本号，再推送对应 Git 标签。
 

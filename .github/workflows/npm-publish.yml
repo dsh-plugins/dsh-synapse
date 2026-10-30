@@ -41,6 +41,8 @@ jobs:
   publish:
     name: Publish to npm
     needs: quality
+    outputs:
+      version: ${{ steps.release.outputs.version }}
     if: >-
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
@@ -135,6 +137,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
       - name: Dump npm latest metadata
+        env:
+          EXPECTED_VERSION: ${{ needs.publish.outputs.version }}
         run: node scripts/dump-npm-latest.mjs
       - name: Commit and push npm-latest.json
         run: |
