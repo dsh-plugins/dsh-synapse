@@ -120,4 +120,18 @@ node scripts/model-smoke.mjs --rerank
 
 自动测试使用真实 SQLite/vec、模拟 OneBot、实际 MCP stdio 服务和 DOM 管理面板，测试不向真实账号发送消息。跨平台 CI 覆盖 Windows、Linux、macOS。真实 QQ/Discord、GitHub 发布以及浏览器图片渲染仍需部署者提供凭据和浏览器后联调。
 
+## npm 自动发布
+
+工作流为 `.github/workflows/npm-publish.yml`，沿用其他 DSH 插件的发布约定：
+
+- PR 和手动运行：执行 Linux、Windows、macOS 的类型检查、构建、测试与打包检查。
+- 推送 `main`：三平台检查全部成功后，将 `X.Y.Z-dev.<GitHub run ID>` 发布到 npm 的 `next` 标签；重跑已发布的同一版本会跳过发布。
+- 推送 `vX.Y.Z` 标签：必须与 `package.json` 的稳定版本号完全一致，检查成功后发布到 `latest`，并将 npm 元数据写入 `npm-latest.json`、提交回 `main`。
+
+开发版只在发布任务的临时检出中修改 `package.json` 和锁文件；仓库保持稳定的 `X.Y.Z` 基础版本。正式发布前先更新两个文件中的版本号，再推送对应 Git 标签。
+
+使用 npm Trusted Publishing 的 GitHub OIDC 身份和 provenance，无需 `NPM_TOKEN`。npm 包的 Trusted Publisher 应配置组织 `dsh-plugins`、仓库 `dsh-synapse`、工作流文件名 **`npm-publish.yml`**；本工作流未使用 GitHub Environment，并执行直接 `npm publish`，对应配置需允许该发布动作。Node.js 24 提供支持 OIDC 的 npm 11。配置要求参见 [npm Trusted Publishing 文档](https://docs.npmjs.com/trusted-publishers/)。
+
+开发版发布后，可在目标 DSH profile 中安装 `@dsh-plugin/dsh-synapse@next`。
+
 AGPL-3.0-only。保留上游许可证、作者说明与完整对应源码，详见 `NOTICE.md`。

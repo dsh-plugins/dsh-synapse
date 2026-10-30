@@ -1,0 +1,149 @@
+name: CI and npm Publish
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+  NPM_REGISTRY: 'https://registry.npmjs.org'
+  PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+jobs:
+  quality:
+    name: Quality (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Build and test
+        run: npm test
+      - name: Inspect npm package contents
+        run: npm pack --dry-run
+
+  publish:
+    name: Publish to npm
+    needs: quality
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: ${{ env.NPM_REGISTRY }}
+          package-manager-cache: false
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Resolve publish version
+        id: release
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          BASE_VERSION="$(node -p "require('./package.json').version")"
+          if [[ ! "$BASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::package.json version must be a stable X.Y.Z value; got $BASE_VERSION"
+            exit 1
+          fi
+
+          if [[ "$REF_TYPE" == "branch" && "$REF_NAME" == "main" ]]; then
+            PUBLISH_VERSION="${BASE_VERSION}-dev.${GITHUB_RUN_ID}"
+            DIST_TAG="next"
+            npm version "$PUBLISH_VERSION" --no-git-tag-version --ignore-scripts
+          elif [[ "$REF_TYPE" == "tag" ]]; then
+            if [[ "$REF_NAME" != "v$BASE_VERSION" ]]; then
+              echo "::error::tag $REF_NAME must exactly match v$BASE_VERSION"
+              exit 1
+            fi
+            PUBLISH_VERSION="$BASE_VERSION"
+            DIST_TAG="latest"
+          else
+            echo "::error::unsupported ref: $REF_TYPE/$REF_NAME"
+            exit 1
+          fi
+
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$PUBLISH_VERSION" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
+      - name: Check whether the version already exists
+        id: published
+        shell: bash
+        env:
+          PACKAGE_NAME: ${{ steps.release.outputs.package_name }}
+          PACKAGE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if QUERY_OUTPUT="$(npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version --registry="$NPM_REGISTRY" 2>&1)"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$PACKAGE_NAME@$PACKAGE_VERSION is already published."
+          elif grep -q 'E404' <<< "$QUERY_OUTPUT"; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            printf '%s\n' "$QUERY_OUTPUT" >&2
+            exit 1
+          fi
+      - name: Build and inspect npm package
+        if: steps.published.outputs.exists != 'true'
+        run: npm pack --dry-run
+      - name: Publish package with OIDC
+        if: steps.published.outputs.exists != 'true'
+        env:
+          DIST_TAG: ${{ steps.release.outputs.dist_tag }}
+        run: npm publish --tag "$DIST_TAG" --access public --provenance
+
+  dump-latest:
+    name: Dump npm latest version
+    needs: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Dump npm latest metadata
+        run: node scripts/dump-npm-latest.mjs
+      - name: Commit and push npm-latest.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add npm-latest.json
+          if git diff --cached --quiet; then
+            echo "npm-latest.json unchanged; nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore(release): 更新 npm 正式版元数据" -m "- 同步 latest 版本及发布包校验信息"
+          git push origin main
