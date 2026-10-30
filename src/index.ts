@@ -21,7 +21,7 @@ export async function createService(
 ) {
   validateConfig(c);
   const paths = pathsFor(ctx, c);
-  await safePath(paths.data);
+  await safePath(paths.profile, "data", "dsh-synapse");
   await mkdir(paths.data, { recursive: true });
   const config = () => c,
     inference = new Inference(paths.data),

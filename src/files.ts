@@ -36,9 +36,10 @@ export async function safePath(root, ...parts) {
     relative = path.relative(path.resolve(root), target);
   if (relative.startsWith("..") || path.isAbsolute(relative))
     throw new Error("路径越界");
-  const parsed = path.parse(target);
-  let current = parsed.root;
-  for (const part of target.slice(parsed.root.length).split(path.sep)) {
+  // System ancestors may be symlinks (macOS /var -> /private/var).
+  // The configured root itself and every path inside it must stay link-free.
+  let current = path.resolve(root);
+  for (const part of ["", ...relative.split(path.sep).filter(Boolean)]) {
     current = path.join(current, part);
     try {
       if ((await lstat(current)).isSymbolicLink())

@@ -37,10 +37,9 @@
     "@dsh-plugin/dsh-loader": "^2.0.0-0"
   },
   "dependencies": {
-    "better-sqlite3": "^12.4.1",
-    "sqlite-vec": "0.1.6",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "axios": "^1.13.5",
+    "better-sqlite3": "^12.4.1",
     "dayjs": "^1.11.19",
     "discord.js": "^14.27.0",
     "gugle-command": "^1.1.17",
@@ -60,18 +59,19 @@
     "markdown-it-task-lists": "^2.1.1",
     "node-cron": "^4.2.1",
     "puppeteer": "23.2.2",
+    "sqlite-vec": "0.1.9",
     "winston": "^3.18.3",
     "winston-daily-rotate-file": "^5.0.0",
     "ws": "^8.18.3"
   },
   "devDependencies": {
     "@dsh-plugin/dsh-loader": "2.0.0-dev.41037890182",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.10.1",
     "esbuild": "^0.25.12",
     "jsdom": "^28.1.0",
-    "typescript": "^5.9.3",
-    "@types/node": "^24.10.1",
-    "@types/better-sqlite3": "^7.6.13",
-    "prettier": "^3.7.1"
+    "prettier": "^3.7.1",
+    "typescript": "^5.9.3"
   },
   "dsh": {
     "bundle": {
