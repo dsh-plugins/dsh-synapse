@@ -1,10 +1,18 @@
+<div align="center">
+
 # @dsh-plugin/dsh-synapse
 
-基于 **dsh-loader 2.0 API** 的 TypeScript 插件：完整保留 gugle-chat-bot 的 QQ、Discord、群管理及通知模块，提供声明式配置、GitHub 自动审查、本地混合记忆与 Skill 自总结。
+**Persistent DSH sessions for QQ and Discord chat, GitHub review, and local memory.**
 
-## 安装与启动
+English | [简体中文](README.zh_CN.md)
 
-要求 Node.js **24.9+**、npm、dsh-loader 2.0、OneBot 11 HTTP/正向 WebSocket 服务。可接入 NapCat 或提供同等 OneBot API 的 Snowluma。图片卡片功能还需要本机 Chrome/Chromium；在配置卡片填写可执行文件路径。
+</div>
+
+A TypeScript plugin built on the **dsh-loader 2.0 API**. It preserves gugle-chat-bot's QQ, Discord, group management, and notification modules while adding declarative configuration, automated GitHub review, local hybrid memory, and automatic Skill summarization.
+
+## Installation and startup
+
+Requires Node.js **24.9+**, npm, dsh-loader 2.0, and a OneBot 11 HTTP/forward WebSocket service. Use NapCat or Snowluma with equivalent OneBot API support. Image cards also require a local Chrome/Chromium installation; enter its executable path in the configuration card.
 
 ```sh
 git clone https://github.com/dsh-plugins/dsh-synapse.git
@@ -14,121 +22,121 @@ npm run build
 npm pack
 ```
 
-在目标 DSH profile 安装 `@dsh-plugin/dsh-loader@next` 和本地生成的 `dsh-plugin-dsh-synapse-0.1.0.tgz`，然后按 DSH 的 bundle 安装流程加载。仓库提供 `cordis.patch.yml`。配置卡片操作区要求 loader **2.0.0-dev.41151102394 或更新的兼容版本**；开发依赖固定到该版本，peer range 为 `^2.0.0-dev.41151102394`。
+Install `@dsh-plugin/dsh-loader@next` and the locally generated `dsh-plugin-dsh-synapse-0.1.0.tgz` in the target DSH profile, then load them through DSH's bundle installation flow. This repository provides `cordis.patch.yml`. The configuration card's operation panels require loader **2.0.0-dev.41151102394 or a newer compatible version**. The development dependency is pinned to that version, with a peer range of `^2.0.0-dev.41151102394`.
 
-在 DSH 插件配置中填写 OneBot 地址、访问令牌，并启用机器人。聊天、GitHub 审查和 Skill 自总结直接使用 **DSH 宿主的原生 Agent 和当前默认模型**，模型由 DSH 自身的模型设置管理。Synapse 只注册配置模板，由 dsh-loader 在对应插件页面自动挂载配置卡片，不额外注册导航入口或独立配置页面。自动 profile 定位失败时，在配置卡片中填写 profile 绝对路径即可恢复。
+Enter the OneBot addresses and access tokens in DSH's plugin configuration, then enable the bot. Chat, GitHub review, and Skill summarization use **the DSH host's native Agent and current default model**. Model selection belongs to DSH's own model settings. Synapse registers a configuration template, and dsh-loader mounts its card on the corresponding plugin page without an extra navigation entry or standalone configuration page. If automatic profile detection fails, enter the profile's absolute path in the card.
 
-默认不开启机器人或 GitHub 发布操作。RAG 在首次实际使用时安装运行时并下载模型；启用机器人后会预热嵌入模型。无网络时，可预先填充相同目录结构的运行时和模型缓存。下载失败会明确报错，不会以随机向量代替本地模型。
+The bot and GitHub publishing are disabled by default. RAG installs its runtime and downloads models on first use; enabling the bot also warms up the embedding model. For offline use, populate the runtime and model caches with the same directory structure beforehand. Download failures produce explicit errors; random vectors are never substituted for the local model.
 
-## QQ、Discord 与上游功能
+## QQ, Discord, and upstream features
 
-固定上游提交：[`018cd46565149877ee6822968a817932f7390ef8`](https://github.com/Gu-ZT/gugle-chat-bot/tree/018cd46565149877ee6822968a817932f7390ef8)。全部 TypeScript 源码位于 `vendor/gugle-chat-bot`，构建时只应用明确列出的适配补丁，详见 `NOTICE.md` 与 `scripts/build.mjs`。
+Pinned upstream commit: [`018cd46565149877ee6822968a817932f7390ef8`](https://github.com/Gu-ZT/gugle-chat-bot/tree/018cd46565149877ee6822968a817932f7390ef8). All upstream TypeScript source is in `vendor/gugle-chat-bot`. The build applies only the explicitly listed adapter patches; see `NOTICE.md` and `scripts/build.mjs`.
 
-| 上游模块 | Synapse 接入方式 |
+| Upstream module | Synapse integration |
 | --- | --- |
-| QQ 群聊、私聊、OneBot 事件 | 独立子进程运行完整 QQBot |
-| Discord 双向桥、图片附件、回复映射、`/send`、斜杠命令 | 保留原模块，在表单中添加服务器、频道与 QQ 群映射 |
-| Hermes 多模态、会话历史、表情回应、进度卡片、审批 | 内部 runs/SSE 适配层连接 DSH 原生 Agent；图片使用宿主附件服务，审批支持本次允许或拒绝 |
-| GitHub 订阅、富文本引用、绑定/白名单 | 签名通过的 Webhook 经 IPC 转发原模块 |
-| 群管理、黑名单、入群请求、欢迎语、戳一戳 | 保留原模块和配置 |
-| B 站订阅、Minecraft 查询、Modrinth、版本跟踪 | 保留原模块（上游默认未调度的任务保持原行为） |
-| 括号匹配、峰谷提醒、Markdown 图片渲染 | 保留原模块；峰谷配置也可从配置卡片修改 |
-| `/help`、`/reload`、`/reboot`、`/shutdown` | 保留权限检查；重启交给父进程；关闭仅作用于机器人进程 |
+| QQ group chat, private chat, and OneBot events | Runs the complete QQBot in a separate child process |
+| Bidirectional Discord bridge, image attachments, reply mapping, `/send`, and slash commands | Preserves the original module; configure server, channel, and QQ group mappings in the form |
+| Hermes multimodal messages, conversation history, reactions, progress cards, and approvals | An internal runs/SSE adapter connects to DSH's native Agent; images use the host attachment service, and approvals support allowing once or rejecting |
+| GitHub subscriptions, rich-text references, bindings, and allowlists | Verified Webhooks reach the original module through IPC |
+| Group management, blocklists, join requests, welcome messages, and pokes | Preserves the original modules and configuration |
+| Bilibili subscriptions, Minecraft queries, Modrinth, and version tracking | Preserves the original modules, including upstream behavior for tasks not scheduled by default |
+| Parenthesis matching, peak/valley reminders, and Markdown image rendering | Preserves the original modules; peak/valley settings are also editable in the configuration card |
+| `/help`, `/reload`, `/reboot`, and `/shutdown` | Preserves permission checks; the parent process handles restarts, and shutdown affects only the bot process |
 
-dsh-loader 根据模板生成逐项表单。群号、管理员、欢迎语、GitHub 订阅、Discord 映射、消息行为和峰谷提醒分别展开编辑；列表支持添加与删除，开关与时段使用对应控件。密码以不回显的凭据占位符保存，配置修订冲突会保留草稿。
+dsh-loader generates individual form fields from the template. QQ group IDs, administrators, welcome messages, GitHub subscriptions, Discord mappings, message behavior, and peak/valley reminders are edited separately. Lists support adding and removing entries, while switches and time ranges use their corresponding controls. Passwords are stored using credential placeholders without revealing their values, and configuration revision conflicts preserve the draft.
 
-QQ 需在「命令入口」「QQ / Discord 消息行为」等功能下添加启用的群号。Discord 在「跨平台桥接」下填写 Bot Token，并逐条添加服务器 ID、频道名称、QQ 群号和转发条件。
+For QQ, add enabled group IDs under features such as Command Entry (命令入口) and QQ / Discord Message Behavior (QQ / Discord 消息行为). For Discord, enter the Bot Token under Cross-platform Bridging (跨平台桥接), then add the server ID, channel name, QQ group ID, and forwarding conditions for each mapping.
 
-升级时自动将旧 JSON 配置迁移到表单，合并上游配置文件中的生效值，并在 `<profile>/data/dsh-synapse/config-before-forms.json` 保留迁移前备份（可能包含旧凭据）。之后通过聊天命令调整的设置，可使用卡片中的「同步聊天命令修改的功能设置」读回表单；该操作会更新已保存配置并重连通道。
+Upgrades automatically migrate legacy JSON configuration into the forms, merge effective values from upstream configuration files, and retain a backup at `<profile>/data/dsh-synapse/config-before-forms.json` (which may contain old credentials). Later changes made through chat commands can be read back into the form using Sync Feature Settings Changed by Chat Commands (同步聊天命令修改的功能设置). This updates the saved configuration and reconnects the channels.
 
-Discord Bot 需要 Message Content Intent；斜杠命令需要 `applications.commands`。桥接群使用上游共享会话逻辑，QQ/Discord 使用同一聊天长期记忆库。OneBot 私聊/群聊和 Discord 的门控、管理员身份仍由上游执行。
+Discord bots require the Message Content Intent; slash commands require `applications.commands`. Bridged groups use upstream shared-session behavior, and QQ/Discord share the same long-term chat memory database. Upstream code continues to enforce message gating and administrator identities for OneBot private/group chat and Discord.
 
-Synapse 按会话绑定长期驻留的 DSH Agent：每个 QQ 群与其桥接的 Discord 频道共用一个会话，私聊按 QQ 用户绑定，GitHub 审查按仓库绑定。群内不同发言人进入同一会话，消息保留发言人标识。每次执行读取 DSH 当前默认模型，并更新提示词、记忆与 Skill；原生会话历史持续保留。工具调用、策略检查、取消和会话生命周期由 DSH 执行。上游 Hermes 的消息协议仅在本机适配层使用；插件不提供额外的模型 API 或外部 harness 配置。
+Synapse binds conversations to persistent DSH Agents. Each QQ group and its bridged Discord channel share one session, private chats are bound by QQ user, and GitHub reviews are bound by repository. Different speakers in a group enter the same session, with speaker identifiers retained in messages. Each run reads DSH's current default model and refreshes the prompt, memory, and Skills while retaining native conversation history. DSH handles tool calls, policy checks, cancellation, and session lifecycle. The upstream Hermes message protocol is used only in the local adapter; the plugin has no additional model API or external harness configuration.
 
-配置卡片的「任务运行限制 → 全部 Synapse 新会话的权限」统一设置群聊、私聊、GitHub 仓库和自总结新建会话的原生权限：仅查看（默认）、工作区修改、完全权限、自动审查。自动审查要求当前 profile 已安装并启用 `@deepseek-ai/dsh-experimental-auto-review`，未启用时明确报错；插件通过宿主权限服务设置预设，沙箱与审批规则由 DSH 执行。修改设置只影响之后新建的会话（包括清除上下文后创建的会话），驻留或恢复的已有会话保留其持久权限；不修改 DSH 其他会话的默认值。此设置不改变 MCP 工具允许列表。
+The configuration card's Task Limits → Permissions for All New Synapse Sessions (任务运行限制 → 全部 Synapse 新会话的权限) setting applies native permissions to new group, private, GitHub repository, and summarization sessions: Read Only (default), Workspace Write, Full Access, or Auto Review. Auto Review requires `@deepseek-ai/dsh-experimental-auto-review` to be installed and enabled in the current profile; otherwise, an explicit error is returned. The plugin sets presets through the host permission service, while DSH enforces sandbox and approval rules. Changes affect only sessions created afterward, including sessions created after clearing context. Existing resident or resumed sessions retain their persisted permissions. This does not change defaults for other DSH sessions or the MCP tool allowlist.
 
-同一会话按接收顺序排队，检索、推理和自总结完成后才处理下一条；不同会话独立推进。图片下载和提交阶段也按聊天会话串行，避免消息插队。取消等待中的任务不会中断前面的任务；“停止”取消当前任务，后续队列继续。“清除上下文 / 新对话 / reset”会取消本会话当前和等待任务，切换到新的原生会话，长期记忆不受影响。旧 DSH 会话日志仍由宿主保管。
+Messages in the same session run in arrival order. Retrieval, inference, and summarization finish before the next message is processed; separate sessions progress independently. Image downloads and submission are also serialized by chat session to preserve message order. Cancelling a waiting task does not interrupt earlier tasks. Stop cancels the current task and lets the remaining queue continue. Clear Context / New Conversation / `reset` cancels active and waiting tasks for that session and switches to a new native session without affecting long-term memory. The host continues to retain old DSH session logs.
 
-会话绑定保存在插件数据目录的 `sessions/`。宿主提供 `sessionPersistence` 服务时，重载后通过原生恢复接口继续同一会话；未启用该服务时，只保证当前运行期间驻留。插件重载会取消聊天执行中和等待中的任务，聊天队列不跨重启重放；GitHub 队列持久化，重载时未完成的任务重新排队。旧机器人历史只在首次新建原生会话时导入一次，不在每轮重复注入。自总结使用独立的临时 Agent，避免总结提示词混入聊天或仓库会话。
+Session bindings are stored under `sessions/` in the plugin data directory. When the host provides `sessionPersistence`, reloads resume the same session through the native restore API. Without that service, persistence is guaranteed only during the current process lifetime. Plugin reloads cancel active and waiting chat tasks; the chat queue is not replayed across restarts. The GitHub queue is durable, and unfinished tasks are requeued on reload. Legacy bot history is imported only once when a native session is first created, rather than being injected on every turn. Summarization uses a separate temporary Agent so its prompt does not enter the chat or repository conversation.
 
-## 提示词、记忆与 Skill
+## Prompts, memory, and Skills
 
 ```text
-<dsh_home>/SOUL.md                         聊天默认人设
-<dsh_home>/AGENTS.md                       审查默认规则
-<dsh_home>/profiles/<profile>/SOUL.md       聊天覆盖
-<dsh_home>/profiles/<profile>/AGENTS.md     审查覆盖
-<profile>/config/dsh-synapse/config.json   loader 配置
-<profile>/skills/<name>/SKILL.md           手动与自动 Skill
+<dsh_home>/SOUL.md                         Default chat persona
+<dsh_home>/AGENTS.md                       Default review instructions
+<dsh_home>/profiles/<profile>/SOUL.md       Chat override
+<dsh_home>/profiles/<profile>/AGENTS.md     Review override
+<profile>/config/dsh-synapse/config.json   Loader configuration
+<profile>/skills/<name>/SKILL.md           Manual and generated Skills
 <profile>/data/dsh-synapse/
-  memory.sqlite                           记忆及审查队列
-  runtime/                                动态安装的推理依赖
-  models/                                 Hugging Face 模型缓存
-  sessions/                               通道与 DSH 会话 ID 的持久化绑定
-  bot/configs/                            上游生效配置
-  bot/data/                               上游历史与运行状态
-  bot/logs/                               上游日志
+  memory.sqlite                           Memory and review queue
+  runtime/                                Dynamically installed inference dependencies
+  models/                                 Hugging Face model cache
+  sessions/                               Persistent channel-to-DSH-session-ID bindings
+  bot/configs/                            Effective upstream configuration
+  bot/data/                               Upstream history and runtime state
+  bot/logs/                               Upstream logs
 ```
 
-提示词每次请求读取，profile 文件优先，支持无需重启修改。Home 的 Skill 作为继承项，profile 同名项覆盖它。卡片内可选择 Skill、粘贴 Markdown 创建、编辑、安全预览、保存和确认删除。保存 Home 继承项会创建当前 profile 覆盖，不修改 Home 文件；删除仅限当前 profile。写入使用修订摘要防止并发覆盖。自动生成的 `auto-chat-*` 和 `auto-review-*` Skill 使用相同目录，分别用于对应通道。Skill 调用表现为检索适用操作步骤并加入当前推理上下文，不执行文档中任意脚本。
+Prompts are read for each request, with profile files taking precedence, so edits do not require a restart. Home Skills are inherited, and profile Skills with the same name override them. The card supports selecting a Skill, creating one by pasting Markdown, editing, safe preview, saving, and confirmed deletion. Saving an inherited Home Skill creates a profile override without changing the Home file; deletion is limited to the current profile. Revision hashes prevent concurrent overwrites. Automatically generated `auto-chat-*` and `auto-review-*` Skills use the same directory and apply to their respective channels. Skill invocation means retrieving relevant procedures and adding them to the current reasoning context; arbitrary scripts in documents are not executed.
 
-聊天与审查记忆按 `chat` / `review` 分区。完成回答后可通过 DSH 原生 Agent 总结重要事项并提炼可复用 Skill，普通闲聊允许不生成内容；生成结果可在卡片内检查。聊天记忆在当前 profile 的 QQ/Discord 通道间共享，请将需要彼此隔离的用户群部署到不同 profile。
+Chat and review memories are partitioned into `chat` and `review`. After answering, a native DSH Agent can summarize important facts and extract reusable Skills; ordinary small talk may produce nothing. Generated content can be inspected in the card. Chat memory is shared among QQ/Discord channels in the current profile. Deploy user groups that require isolation into separate profiles.
 
-Hermes 导入支持普通 Markdown、frontmatter、标题分节、代码块和长段分块。在卡片内粘贴文档、选择聊天或审查分类，预览后批量导入。批量嵌入成功后以事务提交，相同分类和内容去重；取消时不提交未完成批次，共用的模型下载或推理可能继续完成缓存。未知 Hermes 私有方言作为普通 Markdown 保留，不会猜测不存在的结构字段。
+Hermes import supports ordinary Markdown, frontmatter, heading sections, code fences, and chunking of long paragraphs. Paste a document in the card, select the chat or review category, preview it, then import it in bulk. The batch is committed transactionally only after all embeddings succeed, with duplicates removed by category and content. Cancellation does not commit an unfinished batch; shared model downloads or inference may continue to populate the cache. Unknown private Hermes dialects are preserved as ordinary Markdown rather than guessing undocumented fields.
 
-普通配置和操作区均由 dsh-loader 从模板生成，Synapse 不包含客户端入口或独立页面。Skill、MCP、记忆与任务操作通过 `registerOperation` 注册宿主处理器，临时文档和查询结果不写入配置文件，也不触发普通配置保存。旧 `/api/dsh-synapse/` 管理 API 保留，继续使用宿主浏览器认证。
+Both regular configuration and operation panels are generated by dsh-loader from the template. Synapse contains no client entry point or standalone page. Skill, MCP, memory, and task operations register host handlers through `registerOperation`. Temporary documents and query results are not written to configuration files and do not trigger regular configuration saves. The existing `/api/dsh-synapse/` management API remains available with host browser authentication.
 
-## 本地 RAG 与推理隔离
+## Local RAG and inference isolation
 
-- 主插件内置 `better-sqlite3` + `sqlite-vec`，FTS5 对中文文本做字符分词，向量 KNN 与全文排名使用 RRF 融合。
-- 默认初步召回 50 条，再截取配置数量；启用重排时，对候选 `(query, document)` 做本地交叉编码评分。
-- 嵌入：`Xenova/bge-small-zh-v1.5`（BAAI 对应模型的 ONNX 转换，q8/int8、512 维、CLS pooling、归一化）。
-- 重排：`Xenova/bge-reranker-base`，`AutoModelForSequenceClassification` + 配对 tokenizer，按 sigmoid(logit) 排序。
-- `@huggingface/transformers@3.8.1` 只动态安装到当前 profile 的 `runtime/`，Worker 从此处解析依赖，主插件依赖树不包含它。
-- 模型加载先访问 `huggingface.co`，失败后自动以 `hf-mirror.com` 重试。推理在 Worker 中串行执行，下载/推理队列有上限和超时。
+- The main plugin embeds `better-sqlite3` + `sqlite-vec`. FTS5 tokenizes Chinese text by character, and RRF combines vector KNN and full-text rankings.
+- The initial recall count defaults to 50, followed by the configured result limit. When reranking is enabled, a local cross-encoder scores candidate `(query, document)` pairs.
+- Embedding: `Xenova/bge-small-zh-v1.5`, an ONNX conversion of the corresponding BAAI model, using q8/int8, 512 dimensions, CLS pooling, and normalization.
+- Reranking: `Xenova/bge-reranker-base` with `AutoModelForSequenceClassification` and paired tokenization, ranked by sigmoid(logit).
+- `@huggingface/transformers@3.8.1` is installed dynamically only in the current profile's `runtime/`. The Worker resolves dependencies there; the main plugin dependency tree does not include it.
+- Model loading first tries `huggingface.co`, then retries through `hf-mirror.com` on failure. Inference runs serially in a Worker, with bounded download/inference queues and timeouts.
 
-模型来源和使用方式参见 [嵌入模型卡](https://huggingface.co/Xenova/bge-small-zh-v1.5)、[重排模型卡](https://huggingface.co/Xenova/bge-reranker-base)、[sqlite-vec Node.js 文档](https://alexgarcia.xyz/sqlite-vec/js.html)。需要代理时，在启动 DSH 前设置 `HTTPS_PROXY`，Node 24 可配合 `NODE_USE_ENV_PROXY=1`。
+For model sources and usage, see the [embedding model card](https://huggingface.co/Xenova/bge-small-zh-v1.5), [reranker model card](https://huggingface.co/Xenova/bge-reranker-base), and [sqlite-vec Node.js documentation](https://alexgarcia.xyz/sqlite-vec/js.html). If a proxy is needed, set `HTTPS_PROXY` before starting DSH. Node 24 can also use `NODE_USE_ENV_PROXY=1`.
 
 ## MCP
 
-配置卡片支持 stdio、Streamable HTTP、SSE 服务，参数逐项填写，环境变量和请求头使用名称/值表单并持久化。保存配置后可在操作区选择启用的服务，预览实际工具列表及只读参数 Schema（含分页）。服务选项只返回名称，不暴露环境变量或请求头中的凭据。只有管理员在「允许自动调用的工具名称」列表中添加的工具会注册到对应 DSH Agent 的作用域，由宿主工具执行器调用。空列表不自动调用任何工具；外部聊天不继承宿主全局工具。GitHub 审查不执行 MCP 工具。
+The configuration card supports stdio, Streamable HTTP, and SSE services. Arguments are entered individually; environment variables and HTTP headers use persistent name/value fields. After saving, select an enabled service in the operation panel to preview its actual tool list and read-only parameter schemas, including pagination. Service options return names only and do not expose credentials from environment variables or headers. Only tools added by an administrator to Allowed Tool Names for Automatic Invocation (允许自动调用的工具名称) are registered in the corresponding DSH Agent's scope and called through the host tool executor. An empty list enables no automatic tool calls. External chats do not inherit global host tools, and GitHub review does not execute MCP tools.
 
-stdio 服务以当前用户权限运行，其环境默认仅继承 PATH / SystemRoot 及显式配置值。MCP 与自动学习的 Skill 相互独立：Skill 不能扩大工具允许列表。
+stdio services run with the current user's permissions. By default, their environment inherits only PATH / SystemRoot and explicitly configured values. MCP and automatically learned Skills are independent: a Skill cannot expand the tool allowlist.
 
-## GitHub 自动审查
+## Automated GitHub review
 
-Webhook URL：`https://<DSH域名>/hooks/dsh-synapse/github`。配置 `application/json`、相同的 Webhook Secret，以及 PR、Issue、Release 事件。允许列表支持 `owner/repo` 或 `owner/*`。API Token 需要目标仓库读取权限；开启发布时还需相应 Issues / Pull requests 写权限。
+Webhook URL: `https://<DSH域名>/hooks/dsh-synapse/github`. Configure `application/json`, the same Webhook Secret, and PR, Issue, and Release events. The allowlist supports `owner/repo` and `owner/*`. The API Token needs read access to target repositories; publishing also requires the corresponding Issues / Pull requests write permissions.
 
-插件验证原始请求体 HMAC-SHA256，按 delivery ID 去重并持久化任务。PR 抓取分页文件差异、固定 head SHA，发布前再次核对 head；过期事件跳过。超过差异上限会明确标记截断。Issue 生成分诊建议。默认仅保存结果，可在卡片内选择任务查看；启用「自动发布审查评论」后创建 PR 的 COMMENT review 或 Issue comment，不自动 approve 或 merge。每条评论带 delivery 标记，重试前检查远程标记以避免重复发布。
+The plugin verifies HMAC-SHA256 over the raw request body, deduplicates by delivery ID, and persists tasks. For PRs, it fetches paginated file diffs and pins the head SHA, then checks the head again before publishing; stale events are skipped. Diffs exceeding the configured limit are explicitly marked as truncated. Issues receive triage suggestions. Results are saved by default and can be inspected by selecting a task in the card. Enabling Automatically Publish Review Comments (自动发布审查评论) creates a PR COMMENT review or Issue comment; it does not approve or merge. Each comment includes a delivery marker, and retries check remote markers to avoid duplicate publication.
 
-同一仓库的 PR / Issue 共用原生会话并串行审查，不同仓库最多并行处理四个。失败任务保留错误，可在卡片内重试；重启恢复运行中的任务。Webhook 通知同时转发上游 GitHub 订阅功能。旧上游未认证监听端口被禁用。
+PRs and Issues in the same repository share a native session and are reviewed serially. Up to four repositories run concurrently. Failed tasks retain their errors and can be retried from the card; tasks that were running are recovered on restart. Webhook notifications also reach the upstream GitHub subscription feature. The old upstream unauthenticated listener port is disabled.
 
-## 开发与验证
+## Development and verification
 
 ```sh
 npm run typecheck
 npm test
 npm pack --dry-run
-# 可选：实际下载模型，产生的 .runtime-test 被 Git 忽略
+# Optional: download actual models; the resulting .runtime-test is ignored by Git
 node scripts/model-smoke.mjs --rerank
-# 可选：使用已安装的 DSH 组件验证原生 Agent（模型输出使用内存测试桩）
+# Optional: verify the native Agent using installed DSH components (model output is stubbed in memory)
 node scripts/host-smoke.mjs /path/to/installed/dsh/package.json
 ```
 
-自动测试使用真实 SQLite/vec、模拟 OneBot、实际 MCP stdio 服务和 loader 配置存储，测试不向真实账号发送消息。跨平台 CI 覆盖 Windows、Linux、macOS。真实 QQ/Discord、GitHub 发布以及浏览器图片渲染仍需部署者提供凭据和浏览器后联调。
+Automated tests use real SQLite/vec, a simulated OneBot, an actual MCP stdio service, and loader configuration storage. They do not send messages to real accounts. Cross-platform CI covers Windows, Linux, and macOS. Live QQ/Discord, GitHub publishing, and browser image rendering still require deployment credentials and a browser for integration testing.
 
-## npm 自动发布
+## Automated npm publishing
 
-工作流为 `.github/workflows/npm-publish.yml`，沿用其他 DSH 插件的发布约定：
+The workflow is `.github/workflows/npm-publish.yml`, following the release conventions of the other DSH plugins:
 
-- PR 和手动运行：执行 Linux、Windows、macOS 的类型检查、构建、测试与打包检查。
-- 推送 `main`：三平台检查全部成功后，将 `X.Y.Z-dev.<GitHub run ID>` 发布到 npm 的 `next` 标签；重跑已发布的同一版本会跳过发布。
-- 推送 `vX.Y.Z` 标签：必须与 `package.json` 的稳定版本号完全一致，检查成功后发布到 `latest`，并将 npm 元数据写入 `npm-latest.json`、提交回 `main`；遇到 registry 处理延迟时，每 30 秒重试，最多重试 10 次，并核对目标版本。
+- PRs and manual runs perform type checking, builds, tests, and package inspection on Linux, Windows, and macOS.
+- Pushing `main` publishes `X.Y.Z-dev.<GitHub run ID>` to npm's `next` tag after all three platforms pass. Rerunning a version that is already published skips publication.
+- Pushing `vX.Y.Z` requires an exact match with the stable version in `package.json`. After checks pass, the workflow publishes to `latest`, writes npm metadata into `npm-latest.json`, and commits it back to `main`. If registry processing is delayed, it retries every 30 seconds, up to 10 times, and checks the target version.
 
-开发版只在发布任务的临时检出中修改 `package.json` 和锁文件；仓库保持稳定的 `X.Y.Z` 基础版本。正式发布前先更新两个文件中的版本号，再推送对应 Git 标签。
+Development versions modify `package.json` and the lockfile only in the publishing job's temporary checkout; the repository keeps a stable `X.Y.Z` base version. Before a stable release, update the version in both files, then push the corresponding Git tag.
 
-使用 npm Trusted Publishing 的 GitHub OIDC 身份和 provenance，无需 `NPM_TOKEN`。npm 包的 Trusted Publisher 应配置组织 `dsh-plugins`、仓库 `dsh-synapse`、工作流文件名 **`npm-publish.yml`**；本工作流未使用 GitHub Environment，并执行直接 `npm publish`，对应配置需允许该发布动作。Node.js 24 提供支持 OIDC 的 npm 11。配置要求参见 [npm Trusted Publishing 文档](https://docs.npmjs.com/trusted-publishers/)。
+Publishing uses npm Trusted Publishing with GitHub OIDC and provenance, without `NPM_TOKEN`. Configure the npm package's Trusted Publisher with organization `dsh-plugins`, repository `dsh-synapse`, and workflow filename **`npm-publish.yml`**. This workflow does not use a GitHub Environment and runs `npm publish` directly; the publisher configuration must allow that action. Node.js 24 provides npm 11 with OIDC support. See the [npm Trusted Publishing documentation](https://docs.npmjs.com/trusted-publishers/) for configuration requirements.
 
-开发版发布后，可在目标 DSH profile 中安装 `@dsh-plugin/dsh-synapse@next`。
+After a development release, install `@dsh-plugin/dsh-synapse@next` in the target DSH profile.
 
-AGPL-3.0-only。保留上游许可证、作者说明与完整对应源码，详见 `NOTICE.md`。
+AGPL-3.0-only. The upstream license, author attribution, and complete corresponding source are retained; see `NOTICE.md`.
