@@ -1,6 +1,7 @@
 import { defineConfig, validateValues } from "@dsh-plugin/dsh-loader/config";
 import type { ConfigField } from "@dsh-plugin/dsh-loader/config";
 import type { SynapseConfig } from "./types.js";
+import { panels } from "./operation-panels.js";
 import {
   text,
   flag,
@@ -25,7 +26,7 @@ export const template = defineConfig({
   packageName: "@dsh-plugin/dsh-synapse",
   title: "Synapse · 通道与记忆",
   description:
-    "聊天、审查和自总结使用当前 DSH 的默认模型与 Agent 运行时。各功能在下方直接配置；Skill、MCP 工具预览与记忆导入位于 Synapse 管理面板。",
+    "聊天、审查和自总结使用当前 DSH 的默认模型与 Agent 运行时。各功能由 dsh-loader 在此卡片内统一配置和保存。",
   fields: [
     flag("enabled", "启用机器人"),
     text("profileDir", "当前 profile 绝对路径（自动定位失败时填写）"),
@@ -114,6 +115,7 @@ export const template = defineConfig({
       ]),
     ),
   ] satisfies ConfigField[],
+  panels,
 });
 
 export function validateConfig(c: SynapseConfig) {

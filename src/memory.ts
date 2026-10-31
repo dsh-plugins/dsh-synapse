@@ -7,6 +7,7 @@ import type {
 import Database from "better-sqlite3";
 import * as vec from "sqlite-vec";
 import { createHash } from "node:crypto";
+import { abortable } from "./abort.js";
 const channelCheck = (c) => {
   if (!["chat", "review"].includes(c)) throw new Error("记忆分类无效");
   return c;
@@ -65,9 +66,11 @@ export class Memory {
       CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(id INTEGER PRIMARY KEY, embedding float[512], channel TEXT partition key);
       CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY, event TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, error TEXT, result TEXT, updated TEXT DEFAULT CURRENT_TIMESTAMP);`);
   }
-  async addMany(items: MemoryItem[]) {
+  async addMany(items: MemoryItem[], signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const ready = [];
     for (const item of items) {
+      signal?.throwIfAborted();
       channelCheck(item.channel);
       if (!item.text?.trim()) continue;
       const hash = createHash("sha256")
@@ -75,7 +78,10 @@ export class Memory {
         .digest("hex");
       if (this.db.prepare("SELECT 1 FROM memories WHERE hash=?").get(hash))
         continue;
-      const embedding = await this.inference.embed(item.text);
+      const embedding = await abortable(
+        this.inference.embed(item.text),
+        signal,
+      );
       if (
         embedding.length !== 512 ||
         embedding.some((n) => !Number.isFinite(n))
@@ -83,6 +89,7 @@ export class Memory {
         throw new Error("嵌入维度或数值无效");
       ready.push({ ...item, hash, embedding: Float32Array.from(embedding) });
     }
+    signal?.throwIfAborted();
     return this.db.transaction(() => {
       let count = 0;
       for (const item of ready) {
@@ -113,12 +120,13 @@ export class Memory {
     this.db.prepare("DELETE FROM memory_fts WHERE rowid=?").run(id);
     this.db.prepare("DELETE FROM memories WHERE id=?").run(id);
   }
-  async search(query, channel) {
+  async search(query, channel, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     channelCheck(channel);
     const c = this.config();
     if (!c.ragEnabled) return [];
     const embedding = Float32Array.from(
-      await this.inference.embed(query, true),
+      await abortable(this.inference.embed(query, true), signal),
     );
     const vectors = this.db
       .prepare(
@@ -154,9 +162,12 @@ export class Memory {
         score,
       }));
     if (c.reranker && results.length) {
-      const ranks = await this.inference.rerank(
-        query,
-        results.map((x) => x.text),
+      const ranks = await abortable(
+        this.inference.rerank(
+          query,
+          results.map((x) => x.text),
+        ),
+        signal,
       );
       results = results
         .map((x, i) => ({ ...x, score: ranks[i] }))
@@ -170,7 +181,7 @@ export class Memory {
       .prepare(
         "SELECT * FROM memories WHERE channel=? ORDER BY id DESC LIMIT ?",
       )
-      .all(channel, limit);
+      .all(channel, limit) as MemoryRow[];
   }
   close() {
     this.db.close();

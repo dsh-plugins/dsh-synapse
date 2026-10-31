@@ -251,6 +251,9 @@ test("loader 2.0 lifecycle registers, authenticates routes and disposes services
                 watched = null;
               };
             },
+            registerOperation() {
+              return () => {};
+            },
           };
         },
       },
@@ -270,6 +273,8 @@ test("loader 2.0 lifecycle registers, authenticates routes and disposes services
   assert.equal(registered.id, "dsh-synapse");
   assert(watched);
   assert(routes.has("/hooks/dsh-synapse/github"));
+  assert(!routes.has("/synapse"));
+  assert(!routes.has("/synapse-panel.js"));
   const status = await new Promise((resolve) =>
     routes.get("/api/dsh-synapse/")(
       { url: "/api/dsh-synapse/status", headers: {} },

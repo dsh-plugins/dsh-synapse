@@ -1,14 +1,25 @@
 import { build } from "esbuild";
-import { readFile, mkdir, writeFile, copyFile } from "node:fs/promises";
+import { readFile, mkdir, writeFile, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 await mkdir("lib", { recursive: true });
+// Remove artifacts from the former standalone configuration UI on incremental builds.
+for (const file of [
+  "lib/client.js",
+  "lib/host/client.js",
+  "lib/host/client.js.map",
+  "lib/host/client.d.ts",
+  "lib/host/panel.html",
+  "lib/host/panel.js",
+  "lib/host/panel.js.map",
+  "lib/host/panel.d.ts",
+])
+  await rm(file, { force: true });
 const require = createRequire(import.meta.url);
 execFileSync(process.execPath, [require.resolve("typescript/bin/tsc")], {
   stdio: "inherit",
 });
-await copyFile("src/panel.html", "lib/host/panel.html");
 const vendor = path.resolve("vendor/gugle-chat-bot");
 // Patches are applied at build time, keeping the pinned source auditable.
 await build({
@@ -144,17 +155,6 @@ await build({
       },
     },
   ],
-});
-await build({
-  entryPoints: ["src/client.ts"],
-  outfile: "lib/client.js",
-  bundle: true,
-  platform: "browser",
-  format: "cjs",
-  banner: {
-    js: 'window.__ModuleLoader__.load({id:"@dsh-plugin/dsh-synapse",factory:(require)=>{var module={exports:{}};var exports=module.exports;',
-  },
-  footer: { js: "return module.exports;}});" },
 });
 await writeFile(
   "lib/build.json",

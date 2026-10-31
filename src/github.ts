@@ -101,7 +101,7 @@ export class Reviews {
       .prepare(
         "SELECT id,event,state,attempts,error,result,updated FROM deliveries ORDER BY updated DESC LIMIT 50",
       )
-      .all();
+      .all() as (Omit<Delivery, "payload"> & { updated: string })[];
   }
   retry(id) {
     this.db

@@ -50,7 +50,8 @@ export async function safePath(root, ...parts) {
   }
   return target;
 }
-export async function atomicWrite(file, content) {
+export async function atomicWrite(file, content, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   await mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.${randomUUID()}.tmp`;
   try {
@@ -58,7 +59,9 @@ export async function atomicWrite(file, content) {
       encoding: "utf8",
       flag: "wx",
       mode: 0o600,
+      signal,
     });
+    signal?.throwIfAborted();
     await rename(tmp, file);
   } finally {
     await unlink(tmp).catch((e) => {
@@ -137,13 +140,14 @@ export class SkillStore {
     }
     return [...found.values()];
   }
-  mutate(fn) {
+  mutate<T>(fn: () => Promise<T>): Promise<T> {
     const task = this.queue.then(fn);
     this.queue = task.catch(() => {});
     return task;
   }
-  save(name, content, revision = null) {
+  save(name, content, revision = null, signal?: AbortSignal) {
     return this.mutate(async () => {
+      signal?.throwIfAborted();
       skillName(name);
       if (
         typeof content !== "string" ||
@@ -167,22 +171,27 @@ export class SkillStore {
       await atomicWrite(
         useFlat ? flat : await safePath(this.paths.skills, name, "SKILL.md"),
         content,
+        signal,
       );
       return { name, revision: revisionOf(content) };
     });
   }
-  remove(name, revision) {
+  remove(name, revision, signal?: AbortSignal) {
     return this.mutate(async () => {
+      signal?.throwIfAborted();
       skillName(name);
       const current = (await this.list()).find((x) => x.name === name);
       if (!current || current.inherited)
         throw new Error("只能删除当前 profile 的 Skill");
       if (current.revision !== revision)
         throw Object.assign(new Error("Skill 已变更"), { status: 409 });
-      for (const parts of [[name, "SKILL.md"], [`${name}.md`]])
-        await unlink(await safePath(this.paths.skills, ...parts)).catch((e) => {
+      for (const parts of [[name, "SKILL.md"], [`${name}.md`]]) {
+        const file = await safePath(this.paths.skills, ...parts);
+        signal?.throwIfAborted();
+        await unlink(file).catch((e) => {
           if (e.code !== "ENOENT") throw e;
         });
+      }
     });
   }
   async retrieve(query, channel) {

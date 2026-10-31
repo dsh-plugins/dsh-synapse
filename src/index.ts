@@ -1,7 +1,8 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { template, validateConfig } from "./config.js";
 import { registerConfig } from "./config-migration.js";
+import { registerOperations } from "./operations.js";
 import { modulesFromFiles } from "./feature-config.js";
 import { pathsFor, SkillStore, safePath } from "./files.js";
 import { Inference } from "./runtime.js";
@@ -88,12 +89,12 @@ export async function apply(ctx: SynapseContext) {
   let service,
     disposed = false,
     lastError = "",
-    queue = Promise.resolve();
+    queue: Promise<unknown> = Promise.resolve();
   const onError = (e) => {
     lastError = e.message;
     ctx.logger?.warn?.(`[synapse] ${e.message}`);
   };
-  const enqueue = (fn) => {
+  const enqueue = <T>(fn: () => Promise<T>): Promise<T> => {
     const result = queue.then(fn);
     queue = result.catch(onError);
     return result;
@@ -113,6 +114,18 @@ export async function apply(ctx: SynapseContext) {
     });
   const off = handle.watch(
     ({ value }) => void reconfigure(value).catch(() => {}),
+  );
+  registerOperations(
+    handle,
+    (work) =>
+      enqueue(async () => {
+        if (disposed || !service) throw new Error(lastError || "服务尚未就绪");
+        return work(service);
+      }),
+    () =>
+      lastError
+        ? `需要处理：${lastError}`
+        : `机器人：${service?.bot.state || "stopped"}`,
   );
   const manage = async (req, res) => {
     try {
@@ -207,29 +220,6 @@ export async function apply(ctx: SynapseContext) {
       }).catch((e) => {
         if (!res.headersSent) json(res, { error: e.message }, e.status || 400);
       });
-    }),
-  );
-  // A same-origin standalone panel is also available for older DSH clients.
-  routes.push(
-    ctx.dshLoader.web.get("/synapse", async (req, res) => {
-      if (!browserAuthorized(ctx, req, res)) return;
-      const html = await readFile(
-        new URL("./panel.html", import.meta.url),
-        "utf8",
-      );
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8",
-        "Content-Security-Policy":
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'self'",
-      });
-      res.end(html);
-    }),
-  );
-  routes.push(
-    ctx.dshLoader.web.get("/synapse-panel.js", async (req, res) => {
-      if (!browserAuthorized(ctx, req, res)) return;
-      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      res.end(await readFile(new URL("./panel.js", import.meta.url), "utf8"));
     }),
   );
   await reconfigure(handle.get().value).catch(() => {});

@@ -6,7 +6,6 @@
   "main": "lib/host/index.js",
   "exports": {
     ".": "./lib/host/index.js",
-    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -34,7 +33,7 @@
     "pretest": "npm run build"
   },
   "peerDependencies": {
-    "@dsh-plugin/dsh-loader": "^2.0.0-0"
+    "@dsh-plugin/dsh-loader": "^2.0.0-dev.41151102394"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
@@ -65,7 +64,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@dsh-plugin/dsh-loader": "2.0.0-dev.41037890182",
+    "@dsh-plugin/dsh-loader": "2.0.0-dev.41151102394",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.10.1",
     "esbuild": "^0.25.12",
@@ -76,13 +75,6 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "platform": "web",
-      "immediately": true,
-      "inject": [
-        "@dsh-plugin/dsh-loader"
-      ]
     }
   },
   "types": "lib/host/index.d.ts",

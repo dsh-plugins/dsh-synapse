@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { abortable } from "./abort.js";
 export class McpManager {
   config: ConfigSource;
   connections: Map<string, Promise<Client>>;
@@ -71,13 +72,16 @@ export class McpManager {
       );
     return this.connections.get(name);
   }
-  async list(name) {
-    const c = await this.connect(name);
+  async list(name, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const c = await abortable(this.connect(name), signal);
     let cursor;
     const tools = [];
     do {
+      signal?.throwIfAborted();
       const result = await c.listTools(cursor ? { cursor } : undefined, {
         timeout: 15000,
+        signal,
       });
       tools.push(...result.tools);
       cursor = result.nextCursor;
