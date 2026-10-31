@@ -43,6 +43,8 @@ const inference = {
 test("defaults form valid config and reject invalid structured fields", () => {
   const c = config();
   assert.equal(validateConfig(c), c);
+  assert.equal(c.sessionPermission, "read-only");
+  assert.throws(() => validateConfig({ ...c, sessionPermission: "invalid" }));
   assert.throws(() => validateConfig({ ...c, mcpServers: [{ name: "x" }] }));
   assert.throws(() => validateConfig({ ...c, githubEnabled: true }));
   assert.throws(() => validateConfig({ ...c, recallK: 1.5 }));

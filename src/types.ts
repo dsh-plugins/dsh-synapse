@@ -29,6 +29,8 @@ export interface SynapseConfig {
   userAgent: string;
   logLevel: string;
   tokenParams: string;
+  sessionPermission:
+    "read-only" | "workspace-write" | "danger-full-access" | "auto";
   timeoutSec: number;
   maxToolRounds: number;
   githubEnabled: boolean;

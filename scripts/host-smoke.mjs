@@ -60,6 +60,22 @@ class FixtureLlm extends Service {
   }
 }
 await ctx.plugin(FixtureLlm);
+class FixtureShell extends Service {
+  constructor(ctx) {
+    super(ctx, "shell");
+  }
+  sandboxMode = "workspace-write";
+}
+await ctx.plugin(FixtureShell);
+class FixtureWorkingDirectory extends Service {
+  constructor(ctx) {
+    super(ctx, "workingDirectory");
+  }
+  async ensure() {
+    return data;
+  }
+}
+await ctx.plugin(FixtureWorkingDirectory);
 for (const name of [
   "dsh-session-projection",
   "dsh-session",
@@ -68,6 +84,7 @@ for (const name of [
   "dsh-tools",
   "dsh-tool-executor-native",
   "dsh-agent-loop",
+  "dsh-user-approval",
 ]) {
   if (name === "dsh-tool-executor-native") {
     try {
@@ -83,6 +100,15 @@ for (const name of [
     name === "dsh-agent-loop" ? { agents: [], maxParallelToolCalls: 1 } : {},
   );
 }
+const permissionPlugin = await load("dsh-permission-presets");
+await ctx.plugin(permissionPlugin.default ?? permissionPlugin, {
+  presets: {
+    "read-only": { sandbox: "read-only", approval: "ask" },
+    "workspace-write": { sandbox: "workspace-write", approval: "ask" },
+    "danger-full-access": { sandbox: "danger-full-access", approval: "never" },
+  },
+  defaultPreset: "workspace-write",
+});
 await ctx.plugin((await load("dsh-agent-default-model")).default, {
   provider: "host-provider",
   model: "host-model",
@@ -128,6 +154,24 @@ const residentRun = (system, input, tools = [], signal) =>
     undefined,
     "chat:group:123",
   );
+const permissionOf = async (id) => {
+  await ctx.sessionPersistence.flush();
+  const handle = await ctx.sessionPersistence.open(id, "read");
+  try {
+    const read = await handle.read();
+    const events = read.events ?? read;
+    const last = (type) =>
+      events.filter((event) => event.type === type).at(-1)?.data;
+    const preset = last("permission/preset")?.preset;
+    const spec = ctx.permissionPresets.resolve(preset);
+    assert.equal(last("sandbox/mode")?.mode, spec.sandbox);
+    assert.equal(last("approval/policy")?.policy, spec.approval);
+    assert.equal(ctx.permissionPresets.defaultPreset, "workspace-write");
+    return preset;
+  } finally {
+    await handle.close();
+  }
+};
 try {
   assert.equal(
     await residentRun("Shared SOUL {{literal}}", "first resident message"),
@@ -136,6 +180,7 @@ try {
   assert.equal(requests.length, 1);
   assert.equal(requests[0].provider, "host-provider");
   assert.equal(requests[0].model, "host-model");
+  assert.equal(await permissionOf(requests[0].sessionId), "read-only");
   assert.match(JSON.stringify(requests[0]), /Shared SOUL \{\{literal\}\}/);
   callTool = true;
   await residentRun("Shared SOUL", "read docs", [
@@ -156,7 +201,9 @@ try {
   assert.match(JSON.stringify(requests[1]), /first resident message/);
   await harness.close();
   harness = makeHarness();
+  config.sessionPermission = "danger-full-access";
   await residentRun("Updated persona", "after plugin reload");
+  assert.equal(await permissionOf(requests[0].sessionId), "read-only");
   assert.match(JSON.stringify(requests.at(-1)), /first resident message/);
   assert.match(JSON.stringify(requests.at(-1)), /Updated persona/);
   assert.equal((await ctx.sessionPersistence.list()).length, 1);
@@ -196,10 +243,32 @@ try {
   assert.equal(requests.at(-1).sessionId, requests[0].sessionId);
   await harness.reset("chat:group:123");
   await residentRun("Fresh persona", "after explicit reset");
+  assert.equal(
+    await permissionOf(requests.at(-1).sessionId),
+    "danger-full-access",
+  );
   assert(!JSON.stringify(requests.at(-1)).includes("first resident message"));
   assert.equal((await ctx.sessionPersistence.list()).length, 2);
+  config.sessionPermission = "workspace-write";
+  await harness.run("context", "new workspace session");
+  assert.equal(
+    await permissionOf(requests.at(-1).sessionId),
+    "workspace-write",
+  );
+  config.sessionPermission = "auto";
+  await assert.rejects(
+    harness.run("context", "unavailable auto"),
+    /dsh-experimental-auto-review/,
+  );
+  // Older DSH builds lack registerAuto; their three standard modes still work.
+  if (ctx.permissionPresets.registerAuto) {
+    const autoPlugin = await load("dsh-experimental-auto-review");
+    await ctx.plugin(autoPlugin.default ?? autoPlugin);
+    await harness.run("context", "new auto session");
+    assert.equal(await permissionOf(requests.at(-1).sessionId), "auto");
+  }
   console.log(
-    "Real DSH resident Agent: follow-ups, tools, JSONL resume, cancellation/error recovery and reset passed.",
+    "Real DSH resident Agent: permissions, follow-ups, tools, JSONL resume, cancellation/error recovery and reset passed.",
   );
 } finally {
   await harness.close();

@@ -54,6 +54,16 @@ export const template = defineConfig({
       type: "group",
       label: "任务运行限制",
       fields: [
+        {
+          ...select("sessionPermission", "全部 Synapse 新会话的权限", [
+            ["read-only", "仅查看"],
+            ["workspace-write", "工作区修改"],
+            ["danger-full-access", "完全权限"],
+            ["auto", "自动审查"],
+          ]),
+          description:
+            "仅在新建会话时应用，已有会话保留原权限。自动审查需要宿主启用 @deepseek-ai/dsh-experimental-auto-review。",
+        },
         num("timeoutSec", "单次任务超时（秒）", 120, 5, 600),
         num("maxToolRounds", "单次任务最大步骤数", 6, 1, 20),
       ],

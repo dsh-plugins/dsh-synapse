@@ -251,6 +251,18 @@ export class Harness {
       key && persistence?.stat
         ? await persistence.stat(id, { signal })
         : undefined;
+    const preset = this.config().sessionPermission;
+    const permissions = this.loader.services.get("permissionPresets");
+    if (!stored) {
+      if (!permissions?.set)
+        throw new Error("DSH 权限预设服务不可用，无法设置 Synapse 新会话权限");
+      if (!permissions.names?.includes(preset))
+        throw new Error(
+          preset === "auto"
+            ? "自动审查不可用，请在当前 DSH profile 启用 @deepseek-ai/dsh-experimental-auto-review"
+            : `DSH 权限预设不可用：${preset}`,
+        );
+    }
     const resident: Resident = {
       handle: undefined,
       scope: undefined,
@@ -258,6 +270,8 @@ export class Harness {
     };
     const setup = (scope, agent) => {
       resident.scope = scope;
+      // Use the host writer before publication; resumed sessions keep their log.
+      if (!stored) permissions.set(agent.session, preset);
       const prompt = scope.get("systemPrompt"),
         tools = scope.get("tools");
       if (

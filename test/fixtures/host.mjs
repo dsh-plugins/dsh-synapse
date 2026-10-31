@@ -6,7 +6,17 @@ export function hostFixture(execute = async () => "done") {
     resumed = [],
     disposed = [],
     attachments = [],
-    stored = new Map();
+    stored = new Map(),
+    logs = new Map(),
+    permissionWrites = [];
+  const permissions = {
+    names: ["read-only", "workspace-write", "danger-full-access", "auto"],
+    set(session, preset) {
+      if (!this.names.includes(preset)) throw new Error("unknown preset");
+      session.append("permission/preset", { preset });
+      permissionWrites.push({ sessionId: session.id, preset });
+    },
+  };
   let selection = {
     provider: "configured-provider",
     model: "configured-model",
@@ -15,6 +25,8 @@ export function hostFixture(execute = async () => "done") {
     const id = options.sessionId ?? options.resumeSessionId;
     const conversation = stored.get(id) ?? [];
     stored.set(id, conversation);
+    const events = logs.get(id) ?? [];
+    logs.set(id, events);
     const listeners = new Map(),
       tools = [],
       sections = [],
@@ -44,6 +56,11 @@ export function hostFixture(execute = async () => "done") {
     };
     const agent = {
       id,
+      session: {
+        id,
+        events,
+        append: (type, data) => events.push({ type, data }),
+      },
       ctx: scope,
       model: { select: (s) => selected.push(s) },
       inject: (message) => {
@@ -131,6 +148,7 @@ export function hostFixture(execute = async () => "done") {
       get: (name) =>
         ({
           agents: { create, resume: create },
+          permissionPresets: permissions,
           sessionPersistence: {
             stat: async (id) =>
               stored.has(id) ? { header: { id } } : undefined,
@@ -152,6 +170,8 @@ export function hostFixture(execute = async () => "done") {
     disposed,
     attachments,
     stored,
+    permissions,
+    permissionWrites,
     select: (value) => {
       selection = value;
     },
