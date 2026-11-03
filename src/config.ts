@@ -92,7 +92,17 @@ export const template = defineConfig({
       num("memoryK", "上下文记忆条数", 8, 1, 50),
       flag("reranker", "启用本地 bge-reranker-base"),
       flag("learnMemory", "总结重要事项到长期记忆", true),
+      {
+        ...text("memoryPrompt", "主动记录记忆的提示词", "你应主动判断对话或审查中哪些信息值得长期保留，包括已核实的重要事实、用户偏好、长期约束和关键决定。发现这些内容时，先调用 synapse_memory_search 检查已有记忆，再调用 synapse_memory_save 将新信息写入当前通道的 RAG 库，无需等待用户要求记住。记忆应简洁、具体且有依据，必要时说明适用对象与条件；不要记录密钥、凭据、未经证实的推测或短暂状态。只有工具确认写入成功后才能声称已保存；无需为普通闲聊制造记忆。", "textarea"),
+        description: "在启用长期记忆与重要事项总结时注入，保存后对下一次请求生效。",
+        dialog: { id: "memory-prompt-editor", label: "编辑记忆提示词" },
+      },
       flag("learnSkills", "自动总结 Skill", true),
+      {
+        ...text("skillPrompt", "主动总结 Skill 的提示词", "你应主动识别本次任务中已经验证成功、以后可复用的操作步骤，并在完成任务时总结为 Skill。先调用 synapse_skill_list 和 synapse_skill_read 查找可复用或需要更新的内容，再调用 synapse_skill_save 保存；新增 Skill 使用当前通道的 auto-chat- 或 auto-review- 名称前缀，更新时提供读取到的 revision。写明适用场景、前提、具体步骤、验证方法和已确认的注意事项，避免重复创建。不要把猜测、未经验证的方案、密钥或一次性聊天内容保存为 Skill，也不要借 Skill 扩大工具权限。只有工具成功返回后才能确认已保存。", "textarea"),
+        description: "在启用 Skill 自总结时注入，保存后对下一次请求生效。",
+        dialog: { id: "skill-prompt-editor", label: "编辑 Skill 提示词" },
+      },
       num("maxMemories", "最大记忆条数", 20000, 100, 1000000),
     ]),
     {

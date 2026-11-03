@@ -59,6 +59,8 @@ export interface SynapseConfig {
   reranker: boolean;
   learnMemory: boolean;
   learnSkills: boolean;
+  memoryPrompt: string;
+  skillPrompt: string;
   maxMemories: number;
   modules: {
     management: {
@@ -162,6 +164,7 @@ export interface AvailableTool {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
+  execute?: (args: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>;
 }
 export interface ChatMessage {
   role: string;

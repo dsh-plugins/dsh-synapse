@@ -170,7 +170,7 @@ test("cross-site and unavailable browser authentication are denied", () => {
   );
   assert.equal(status, 403);
 });
-test("agent injects SOUL, retrieved skill and memory; tools execute only in chat", async () => {
+test("agent injects SOUL, retrieved skill and memory; MCP executes only in chat", async () => {
   const p = await fixture();
   await writeFile(path.join(p.profile, "SOUL.md"), "shared soul");
   const c = { ...config(), learnSkills: false, learnMemory: false };
@@ -184,8 +184,10 @@ test("agent injects SOUL, retrieved skill and memory; tools execute only in chat
         /shared soul|Review changes/,
       );
       assert.match(variables.get("synapse_context")(), /durable/);
-      if (tools.length)
-        await tools[0].execute({}, { signal: new AbortController().signal });
+      const mcp = tools.find((tool) => tool.name === "mcp_0");
+      if (mcp) {
+        await mcp.execute({}, { signal: new AbortController().signal });
+      }
       return "done";
     },
   );

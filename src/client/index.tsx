@@ -1,5 +1,5 @@
 /**
- * dsh-synapse 浏览器半区：为 config-api 的 modules / mcpServers 字段注册
+ * dsh-synapse 浏览器半区：为功能、MCP 和自总结提示词字段注册
  * 自定义配置弹窗。字段模板从宿主侧共享（moduleFields / mcpServerItem），
  * 弹窗内部使用等价的声明式渲染器，外壳、校验与修订号保存由 dsh-loader 负责。
  */
@@ -112,4 +112,27 @@ export function apply(ctx: {
     title: "编辑 MCP 服务",
     component: McpServersEditor,
   });
+  for (const [field, label] of [["memoryPrompt", "记忆"], ["skillPrompt", "Skill"]] as const) {
+    ctx.dshLoaderUi.config.registerDialog<string>(ctx, {
+      id: field === "memoryPrompt" ? "memory-prompt-editor" : "skill-prompt-editor",
+      configId: "dsh-synapse",
+      field: [field],
+      title: `编辑${label}提示词`,
+      component: PromptEditor,
+    });
+  }
+}
+
+function PromptEditor({ value, setValue, saving, errors }: ConfigDialogProps<string>) {
+  return (
+    <div className="synapse-config-form">
+      <StyleTag />
+      <div className="synapse-config-control">
+        <label className="synapse-config-label" htmlFor="synapse-learning-prompt">系统提示词</label>
+        <textarea id="synapse-learning-prompt" rows={16} value={value ?? ""} disabled={saving} onChange={(event) => setValue(event.target.value)} />
+        <p className="synapse-config-help">保存后对下一次请求生效。留空时不注入此段要求。</p>
+        {Object.entries(errors).map(([key, message]) => <p key={key} className="synapse-config-error">{message}</p>)}
+      </div>
+    </div>
+  );
 }
