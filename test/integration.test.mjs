@@ -199,7 +199,10 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
       [1, "first group message"],
       [2, "second group message"],
       [1, "清除上下文"],
-    ])
+    ]) {
+      if (text === "清除上下文") {
+        await waitFor(() => requests.some((r) => r.url === "/send_group_msg" && JSON.stringify(r.body).includes("example-release")));
+      }
       socket.send(
         JSON.stringify({
           post_type: "message",
@@ -213,6 +216,7 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
           sender: { user_id: user, nickname: "tester" + user, role: "owner" },
         }),
       );
+    }
     await waitFor(() => resets.length === 1, 12000);
     assert.deepEqual(
       received.slice(1).map((r) => r.key),
