@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { template } from "../lib/host/config.js";
 import { operationFixture } from "./fixtures/operations.mjs";
 
-test("loader card operations create, preview, update and delete Skill with revision protection", async (t) => {
+test("loader card operations create, update and delete Skill with revision protection", async (t) => {
   const f = await operationFixture();
   t.after(() => f.close());
   const before = f.handle.get();
@@ -23,11 +24,6 @@ test("loader card operations create, preview, update and delete Skill with revis
   assert.equal(created.resource.id, "skill:demo");
   assert.equal((await f.invoke("skills.list")).value.items[0].name, "demo");
   const loaded = await f.invoke("skills.load", { selected: "demo" });
-  const preview = "<script>alert(1)</script>\n# 标题";
-  assert.equal(
-    (await f.invoke("skills.preview", { content: preview })).value,
-    preview,
-  );
   await assert.rejects(
     f.invoke("skills.create", { name: "demo", content: "覆盖" }),
     { code: "conflict" },
@@ -103,33 +99,29 @@ test("Home Skill is identified, cannot be deleted, and saves as a profile overri
   );
 });
 
-test("MCP selection uses only saved enabled names without exposing server credentials", async (t) => {
-  const f = await operationFixture();
+test("机器人不可用时仍可测试 MCP 草稿并按修订号保存、删除，凭据保持脱敏", async (t) => {
+  const f = await operationFixture({ serviceAvailable: false });
   t.after(() => f.close());
-  await f.handle.update({
-    mcpServers: [
-      {
-        name: "docs",
-        enabled: true,
-        transport: "stdio",
-        command: "node",
-        args: [],
-        env: [{ name: "TOKEN", value: "never-expose" }],
-        url: "",
-        headers: [],
-        allowedTools: [],
-      },
-    ],
-  });
-  const names = await f.invoke("mcp.servers");
-  assert.deepEqual(names.value.items, [{ name: "docs" }]);
-  assert(!JSON.stringify(names).includes("never-expose"));
-  assert.equal(
-    (await f.invoke("mcp.tools", { name: "docs" })).value.tools[0].name,
-    "lookup",
-  );
-  await f.handle.update({ mcpServers: [] });
-  await assert.rejects(f.invoke("mcp.tools", { name: "docs" }), /未启用/);
+  await f.handle.update({ mcpServers: [{
+    name: "saved", enabled: true, transport: "stdio", command: process.execPath,
+    args: [fileURLToPath(new URL("./fixtures/mcp-server.mjs", import.meta.url))],
+    env: [{ name: "TOKEN", value: "never-expose" }], headers: [], url: "", allowedTools: [],
+  }] });
+  const before = f.handle.get();
+  const server = { ...f.store.read("dsh-synapse").value.mcpServers[0], name: "draft", enabled: false };
+  const result = await f.invoke("mcp.test", { server });
+  assert.deepEqual(result.value.tools.map(tool => tool.name).sort(), ["blocked", "read"]);
+  assert(!JSON.stringify(result).includes("never-expose"));
+  assert.deepEqual(f.handle.get(), before);
+  const resource = { id: "mcp-servers", revision: before.revision };
+  const saved = await f.invoke("mcp.save", { originalName: "saved", server }, resource);
+  assert.equal(f.handle.get().value.mcpServers[0].name, "draft");
+  assert.equal(f.handle.get().value.mcpServers[0].env[0].value, "never-expose");
+  await assert.rejects(f.invoke("mcp.save", { originalName: "saved", server }, resource), { code: "conflict" });
+  await assert.rejects(f.invoke("mcp.save", { originalName: "draft", server: { ...server, enabled: true, command: "" } }, saved.resource), /启动命令不能为空/);
+  await assert.rejects(f.invoke("mcp.delete", { originalName: "draft", confirmDelete: false }, saved.resource), { code: "validation" });
+  await f.invoke("mcp.delete", { originalName: "draft", confirmDelete: true }, saved.resource);
+  assert.deepEqual(f.handle.get().value.mcpServers, []);
 });
 
 test("Hermes preview/import stay transient, deduplicate, and abort without a partial commit", async (t) => {

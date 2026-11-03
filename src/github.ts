@@ -97,11 +97,17 @@ export class Reviews {
     void this.drain();
   }
   list() {
-    return this.db
+    const rows = this.db
       .prepare(
-        "SELECT id,event,state,attempts,error,result,updated FROM deliveries ORDER BY updated DESC LIMIT 50",
+        "SELECT id,event,state,attempts,error,result,updated,payload FROM deliveries ORDER BY updated DESC LIMIT 50",
       )
-      .all() as (Omit<Delivery, "payload"> & { updated: string })[];
+      .all() as (Delivery & { updated: string })[];
+    return rows.map(({ payload, ...job }) => {
+      const data = JSON.parse(payload);
+      const issue = data.pull_request ?? data.issue;
+      const repository = data.repository?.full_name ?? "";
+      return { ...job, target: issue?.number ? `${repository}#${issue.number}` : repository || job.id };
+    });
   }
   retry(id) {
     this.db

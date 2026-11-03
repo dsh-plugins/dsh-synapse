@@ -14,7 +14,7 @@ export class McpManager {
     this.connections = new Map();
     this.closed = false;
   }
-  async connect(name) {
+  async connect(name, signal?: AbortSignal) {
     if (this.closed) throw new Error("MCP 已关闭");
     const spec = this.config().mcpServers.find(
       (x) => x.name === name && x.enabled,
@@ -57,15 +57,19 @@ export class McpManager {
                     },
                   });
           try {
-            await client.connect(transport, { timeout: 15000 });
+            await client.connect(transport, { timeout: 15000, signal });
             if (this.closed) {
               await client.close();
               throw new Error("MCP 已关闭");
             }
             return client;
           } catch (e) {
-            await transport.close().catch(() => {});
             this.connections.delete(name);
+            try {
+              await transport.close();
+            } catch (cleanup) {
+              throw new AggregateError([e, cleanup], "MCP 连接与清理失败");
+            }
             throw e;
           }
         })(),

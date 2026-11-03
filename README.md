@@ -53,13 +53,13 @@ Changes apply only to new or reset conversations. Existing and restored conversa
 
 `<dsh_home>/SOUL.md` sets the default chat persona, and `<dsh_home>/AGENTS.md` sets GitHub review guidelines. A file with the same name in `<dsh_home>/profiles/<profile>/` takes precedence for that profile. Edits take effect on the next request without a restart.
 
-Chat and review memories are stored separately. QQ and Discord share chat memory within a profile; use separate profiles for groups whose memories need to stay separate. To import existing Hermes memories, paste Markdown in "Hermes Memory Import & Search", choose chat or review, preview the entries, then import the batch.
+聊天与审查记忆分开保存，同一 profile 下的 QQ 与 Discord 共享聊天记忆。导入 Hermes 记忆时，在“RAG / Skill 自总结”点击“导入 Hermes 记忆”，在弹窗粘贴文本，点击右上角预览 Markdown，再点击底部“确认导入”。
 
-With automatic summarization enabled, Synapse can turn useful experience into Skills for similar tasks later. Skills contain reusable instructions and are not run as scripts. In "Skill Management", paste Markdown to create a Skill, or edit, preview, and delete existing entries. Saving an inherited home Skill creates an override for the current profile and leaves the original file in place.
+“Skill 管理”通过表格列出名称与来源，点击“编辑”先预览 Markdown，再通过右上角“编辑”和“保存”修改内容。支持新增和删除 profile 条目；保存继承的 Home Skill 会创建 profile 覆盖，保留原文件。模型主动委派原生 sub-agent 总结 Skill 与重要记忆，详见[中文文档](README.zh_CN.md#人设记忆与-skill)。
 
 ## MCP
 
-For external tools, add a server under "MCP Servers", choose `stdio`, `Streamable HTTP`, or `SSE`, and fill in the relevant command arguments or URL, environment variables, and headers. After saving, select the server in "MCP Tool Preview" to see its tools. `stdio` servers run with your current OS user's permissions.
+“MCP 管理”通过表格列出服务，点击新增或编辑后在弹窗设置 `stdio`、`Streamable HTTP` 或 `SSE`。点击“测试并获取工具”测试当前草稿，工具列表与参数 Schema 显示在弹窗底部，无需提前保存；右上角保存后生效。`stdio` 服务以当前系统用户权限运行。
 
 Add the tool names you want to use under "Tool names allowed for automatic invocation". Chat sessions can call only the listed tools; an empty list enables no MCP calls. GitHub reviews do not use MCP.
 
@@ -69,7 +69,7 @@ Add a Webhook in your GitHub repository or organization. Set the Payload URL to 
 
 Under "GitHub Webhook" in the plugin settings, enter the same Secret, a GitHub Token with repository read access, and the allowed repositories, such as `owner/repo` or `owner/*`. Turn on "Enable Webhook Review".
 
-PR review comments and issue triage notes are saved locally by default. Read results or retry failed tasks under "GitHub Review Tasks". To publish results to GitHub, grant the Token `Issues` and `Pull requests` write permissions and turn on "Automatically publish review comments". Publishing posts comments; it does not approve or merge PRs.
+审查结果默认保存在本地。“GitHub 审查任务”通过可滚动表格列出目标、类型、状态与更新时间，支持查看结果和重试失败任务。聊天与审查会话分别使用 `<profile>/workspace/chat/` 和 `<profile>/workspace/review/`，目录自动创建。发布审查评论需要 Token 的 `Issues` 和 `Pull requests` 写权限，并启用自动发布；不会自动 approve 或 merge PR。
 
 ## FAQ
 

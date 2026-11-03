@@ -1,24 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
-import vm from "node:vm";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Agent } from "../lib/host/agent.js";
 import { operationFixture } from "./fixtures/operations.mjs";
+import { loadClient } from "./fixtures/client.mjs";
 import { hostFixture } from "./fixtures/host.mjs";
 
 test("两个提示词弹窗编辑并通过 loader 保存后用于实际 Agent 上下文", async (t) => {
   const f = await operationFixture();
   t.after(() => f.close());
-  const dialogs = [];
-  const require = createRequire(import.meta.url);
-  vm.runInNewContext(await readFile(new URL("../lib/client.js", import.meta.url), "utf8"), {
-    window: { __ModuleLoader__: { load: ({ factory }) => factory(require).apply({
-      dshLoaderUi: { config: { registerDialog: (_owner, dialog) => dialogs.push(dialog) } },
-    }) } },
-  });
+  const { dialogs } = await loadClient();
   const agent = new Agent({ ...f.service, loader: hostFixture().loader });
   t.after(() => agent.close());
   function textarea(element) {

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir } from "node:fs/promises";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ConfigStore } from "../../node_modules/@dsh-plugin/dsh-loader/dist/services/config.js";
@@ -7,7 +7,7 @@ import { registerOperations } from "../../lib/host/operations.js";
 import { SkillStore } from "../../lib/host/files.js";
 import { Memory } from "../../lib/host/memory.js";
 
-export async function operationFixture() {
+export async function operationFixture({ serviceAvailable = true } = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), "synapse-operations-"));
   const profile = path.join(home, "profiles", "test");
   const paths = {
@@ -52,7 +52,10 @@ export async function operationFixture() {
   registerOperations(
     handle,
     (work) => {
-      const result = queue.then(() => work(service));
+      const result = queue.then(() => {
+        if (!serviceAvailable) { throw new Error("服务尚未就绪"); }
+        return work(service);
+      });
       queue = result.catch(() => {});
       return result;
     },
@@ -75,6 +78,11 @@ export async function operationFixture() {
       await queue;
       service.memory.close();
       store.dispose();
+      const target = path.resolve(home);
+      if (path.dirname(target) !== path.resolve(os.tmpdir()) || !path.basename(target).startsWith("synapse-operations-")) {
+        throw new Error("临时配置目录不在预期范围内");
+      }
+      await rm(target, { recursive: true, force: true });
     },
   };
 }

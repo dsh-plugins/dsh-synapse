@@ -1,13 +1,15 @@
 /**
- * dsh-synapse 浏览器半区：为功能、MCP 和自总结提示词字段注册
- * 自定义配置弹窗。字段模板从宿主侧共享（moduleFields / mcpServerItem），
- * 弹窗内部使用等价的声明式渲染器，外壳、校验与修订号保存由 dsh-loader 负责。
+ * Synapse 配置面板：共享宿主字段模板，并通过 loader 注册管理表格与配置弹窗。
  */
 import * as React from "react";
 import type { ConfigDialogProps, DshLoaderUi } from "@dsh-plugin/dsh-loader/client";
-import { moduleFields, mcpServerItem } from "../feature-config.js";
-import { Fields, DIALOG_CSS, fieldDefault, setAt } from "./fields.js";
+import { moduleFields } from "../feature-config.js";
+import { Fields, DIALOG_CSS, setAt } from "./fields.js";
 import type { SynapseConfig } from "../types.js";
+import { SkillsPanel } from "./skills.js";
+import { McpPanel } from "./mcp.js";
+import { MemoryImportPanel } from "./memory.js";
+import { ReviewsPanel } from "./reviews.js";
 
 export const inject = ["dshLoaderUi"];
 
@@ -35,65 +37,6 @@ function ModulesEditor({
   );
 }
 
-function McpServersEditor({
-  value,
-  setValue,
-  errors,
-}: ConfigDialogProps<SynapseConfig["mcpServers"]>) {
-  const list = Array.isArray(value) ? value : [];
-  return (
-    <div className="synapse-config-form">
-      <StyleTag />
-      {list.length === 0 && <p className="synapse-config-empty">暂无 MCP 服务</p>}
-      {list.map((server, index) => (
-        <fieldset className="synapse-config-group" key={index}>
-          <legend>{server?.name?.trim() || `服务 ${index + 1}`}</legend>
-          <div className="synapse-config-group-body">
-            <Fields
-              fields={(mcpServerItem.fields ?? []).map((field) => ({
-                ...field,
-                // 密码引用形态在弹窗中按普通文本处理，保存时由宿主恢复。
-              }))}
-              draft={server}
-              path={[]}
-              onChange={(path, next) =>
-                setValue(
-                  list.map((entry, i) => (i === index ? setAt(entry, path, next) : entry)),
-                )
-              }
-              errors={errors}
-              prefix={`synapse-mcp-${index}`}
-            />
-            <div className="synapse-config-actions">
-              <button
-                type="button"
-                onClick={() =>
-                  setValue(list.filter((_, i) => i !== index) as SynapseConfig["mcpServers"])
-                }
-              >
-                删除此服务
-              </button>
-            </div>
-          </div>
-        </fieldset>
-      ))}
-      <div className="synapse-config-actions">
-        <button
-          type="button"
-          onClick={() =>
-            setValue([
-              ...list,
-              fieldDefault(mcpServerItem) as SynapseConfig["mcpServers"][number],
-            ] as SynapseConfig["mcpServers"])
-          }
-        >
-          新增 MCP 服务
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function apply(ctx: {
   effect(fn: () => (() => void) | void): unknown;
   dshLoaderUi: Pick<DshLoaderUi, "config">;
@@ -105,13 +48,9 @@ export function apply(ctx: {
     title: "编辑聊天与通知功能",
     component: ModulesEditor,
   });
-  ctx.dshLoaderUi.config.registerDialog<SynapseConfig["mcpServers"]>(ctx, {
-    id: "mcp-servers-editor",
-    configId: "dsh-synapse",
-    field: ["mcpServers"],
-    title: "编辑 MCP 服务",
-    component: McpServersEditor,
-  });
+  for (const [id, component] of [["skills", SkillsPanel], ["mcp", McpPanel], ["memory-import", MemoryImportPanel], ["reviews", ReviewsPanel]] as const) {
+    ctx.dshLoaderUi.config.registerPanel(ctx, { id, configId: "dsh-synapse", component });
+  }
   for (const [field, label] of [["memoryPrompt", "记忆"], ["skillPrompt", "Skill"]] as const) {
     ctx.dshLoaderUi.config.registerDialog<string>(ctx, {
       id: field === "memoryPrompt" ? "memory-prompt-editor" : "skill-prompt-editor",

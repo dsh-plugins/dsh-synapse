@@ -86,7 +86,7 @@ export const template = defineConfig({
       flag("publishReviews", "自动发布审查评论"),
       num("maxDiffChars", "最大差异字符数", 80000, 1000, 500000),
     ]),
-    collapsibleGroup("RAG / Skill 自总结", [
+    { ...collapsibleGroup("RAG / Skill 自总结", [
       flag("ragEnabled", "启用本地混合记忆", true),
       num("recallK", "初步召回数量", 50, 1, 200),
       num("memoryK", "上下文记忆条数", 8, 1, 50),
@@ -104,14 +104,14 @@ export const template = defineConfig({
         dialog: { id: "skill-prompt-editor", label: "编辑 Skill 提示词" },
       },
       num("maxMemories", "最大记忆条数", 20000, 100, 1000000),
-    ]),
+    ]), panel: "memory-import" },
     {
       ...object("modules", "聊天与通知功能", moduleFields),
       dialog: { id: "modules-editor", label: "编辑聊天与通知功能" },
     },
     {
       ...array("mcpServers", "MCP 服务", mcpServerItem),
-      dialog: { id: "mcp-servers-editor", label: "编辑 MCP 服务" },
+      hidden: true,
     },
   ] satisfies ConfigField[],
   panels,
