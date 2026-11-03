@@ -53,7 +53,7 @@ Changes apply only to new or reset conversations. Existing and restored conversa
 
 ## Persona, Memory & Skills
 
-`<dsh_home>/SOUL.md` sets the default chat persona, and `<dsh_home>/AGENTS.md` sets GitHub review guidelines. A file with the same name in `<dsh_home>/profiles/<profile>/` takes precedence for that profile. Edits take effect on the next request without a restart.
+聊天与审查均继承宿主 `standard` 预设的系统提示词、工具及原生 AGENTS.md 加载机制。`<dsh_home>/SOUL.md` 提供聊天补充规则，`<dsh_home>/AGENTS.md` 提供审查补充规则，profile 下的同名文件优先。这些文件通过宿主渲染器作为带来源路径的用户角色规则上下文注入，标准系统提示词保留；修改、删除和恢复去重均在后续请求中生效。
 
 聊天与审查记忆分开保存，同一 profile 下的 QQ 与 Discord 共享聊天记忆。导入 Hermes 记忆时，在“RAG / Skill 自总结”点击“导入 Hermes 记忆”，在弹窗粘贴文本，点击右上角预览 Markdown，再点击底部“确认导入”。
 
@@ -63,7 +63,7 @@ Changes apply only to new or reset conversations. Existing and restored conversa
 
 “MCP 管理”通过表格列出服务，点击新增或编辑后在弹窗设置 `stdio`、`Streamable HTTP` 或 `SSE`。点击“测试并获取工具”测试当前草稿，工具列表与参数 Schema 显示在弹窗底部，无需提前保存；右上角保存后生效。`stdio` 服务以当前系统用户权限运行。
 
-Add the tool names you want to use under "Tool names allowed for automatic invocation". Chat sessions can call only the listed tools; an empty list enables no MCP calls. GitHub reviews do not use MCP.
+本面板的 MCP 服务提供给聊天会话，只有允许列表内的工具可供调用，留空时停用这些服务的调用。宿主标准预设提供的工具按宿主配置向聊天与审查会话开放。
 
 ## GitHub Reviews
 

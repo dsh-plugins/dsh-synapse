@@ -70,10 +70,13 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
     const listeners = new Map(),
       tools = [],
       sections = [],
+      contexts = [],
       variables = new Map(),
       injected = [],
       restrictions = [],
       selected = [];
+    let committedInjections = 0;
+    let runtimeContext = events.findLast(event => event.type === "user/message" && event.data.source?.kind === "runtime-context")?.data.content[0]?.text ?? "";
     let controller = new AbortController(),
       task = Promise.resolve();
     const emit = (name, data) => listeners.get(name)?.({ agent, ...data });
@@ -84,6 +87,10 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
             section: (s) => {
               sections.push(s);
               return () => sections.splice(sections.indexOf(s), 1);
+            },
+            context: (entry) => {
+              contexts.push(entry);
+              return () => contexts.splice(contexts.indexOf(entry), 1);
             },
             variable: (name, fn) => {
               variables.set(name, fn);
@@ -134,6 +141,16 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
               kind: archived.has(id) ? "reject" : "enter",
             }));
             if (admission?.kind === "reject") { return; }
+            for (const context of injected.slice(committedInjections)) { agent.session.append("user/message", context); }
+            committedInjections = injected.length;
+            agent.session.append("user/message", message);
+            const currentContext = contexts.map(entry => entry.text({ agent })).filter(Boolean).join("\n");
+            if (currentContext !== runtimeContext) {
+              const context = { role: "user", content: [{ type: "text", text: currentContext }], source: { kind: "runtime-context" } };
+              conversation.push(context);
+              agent.session.append("user/message", context);
+              runtimeContext = currentContext;
+            }
             const output = await execute({
               options,
               message,
@@ -238,6 +255,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
     } : { startActivation }),
   };
   const loader = {
+    dsh: { agentInstructions: { renderAgentInstructions: files => ({ text: files.map(file => `${file.displayPath}\n${file.content}`).join("\n") }) } },
     llm: {
       createUserMessage: (input) => ({
         id: randomUUID(),
@@ -251,6 +269,15 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
           agents,
           subagents,
           workspaceRegistry,
+          agentPresets: {
+            async mount(scope, id) {
+              if (id !== "standard") { throw new Error("预设不存在"); }
+              scope.get("systemPrompt").section({ name: "deployment:persona-prefix", text: "宿主标准系统提示词" });
+              scope.get("tools").register({ name: "standard_read", execute: async () => ({ content: "宿主标准工具结果" }) });
+              return { id };
+            },
+            presetForSession: session => session.events.filter(event => event.type === "agent-preset/selected").at(-1)?.data.agentPreset ?? session.header.agentPreset ?? null,
+          },
           workingDirectory: {
             get: (session) => session.events.filter(event => event.type === "working-directory/change").at(-1)?.data.cwd ?? session.header.cwd,
             set: async (agent, cwd, signal) => {

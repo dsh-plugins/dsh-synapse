@@ -176,7 +176,7 @@ test("failed turns do not block followers; reloading restores history and refres
     assert.equal(f.host.resumed.length, 1);
     assert.equal(f.host.created[0].agent.id, f.host.resumed[0].agent.id);
     assert.match(JSON.stringify(f.host.resumed[0].conversation), /next/);
-    assert.match(seen.at(-1).prompt, /updated persona/);
+  assert(f.host.resumed[0].conversation.some(message => message.source?.kind === "runtime-context" && message.content[0].text.includes("updated persona")));
     assert.equal(seen.at(-1).selected.model, "new-model");
   } finally {
     await reloaded.close();

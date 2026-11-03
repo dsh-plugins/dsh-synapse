@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { mkdtemp, rm, mkdir, writeFile, stat as fsStat } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile, stat as fsStat } from "node:fs/promises";
 import os from "node:os";
 import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
 import { template } from "../lib/host/config.js";
@@ -25,8 +25,26 @@ const load = async (name) =>
   import(pathToFileURL(require.resolve("@deepseek-ai/" + name)).href);
 const { Context, Service } = await load("cordis");
 const llm = await load("dsh-llm");
-const ctx = new Context();
+const nativeInstructions = await load("dsh-agent-instructions");
 const data = await mkdtemp(path.join(os.tmpdir(), "synapse-native-"));
+const originalDshHome = process.env.DSH_HOME;
+process.env.DSH_HOME = data;
+await writeFile(path.join(data, "AGENTS.md"), "宿主原生 AGENTS 规则");
+let hasPresets = true;
+try {
+  require.resolve("@deepseek-ai/dsh-agent-preset-registry");
+} catch (error) {
+  if (error.code !== "MODULE_NOT_FOUND") { throw error; }
+  hasPresets = false;
+}
+let ctx;
+if (hasPresets) {
+  const configPath = path.join(data, "cordis.yml");
+  await writeFile(configPath, "[]\n");
+  ctx = await (await load("dsh-app-boot")).boot("synapse-native", configPath, [], undefined, pathToFileURL(path.resolve(process.argv[2])).href);
+} else {
+  ctx = new Context();
+}
 const requests = [];
 const routes = [];
 const nativeCalls = [];
@@ -56,7 +74,7 @@ class FixtureLlm extends Service {
     if (callTool) {
       callTool = false;
       assert(request.tools.some((t) => t.name === "mcp_fixture_read"));
-      assert(!request.tools.some((t) => t.name === "global_tool"));
+      assert(request.tools.some((t) => t.name === "global_tool"));
       yield {
         type: "tool-call-delta",
         index: 0,
@@ -94,10 +112,19 @@ class FixtureFs extends Service {
   }
   async stat(target, signal) {
     signal?.throwIfAborted();
-    const info = await fsStat(target);
-    return { type: info.isDirectory() ? "directory" : "file" };
+    try {
+      const info = await fsStat(target);
+      return { type: info.isDirectory() ? "directory" : "file", size: info.size, version: `${info.mtimeMs}:${info.size}` };
+    } catch (error) {
+      if (error.code === "ENOENT") { return undefined; }
+      throw error;
+    }
   }
   processPath(target) { return target; }
+  async *streamText(target, signal) {
+    signal?.throwIfAborted();
+    yield await readFile(target, "utf8");
+  }
 }
 await ctx.plugin(FixtureFs);
 class FixtureWorkingDirectory extends Service {
@@ -192,21 +219,32 @@ if (hasWorkspaceRegistry) {
     await ctx.plugin(plugin.default ?? plugin, settings);
   }
 }
+if (hasPresets) {
+  const entry = name => pathToFileURL(require.resolve("@deepseek-ai/" + name)).href;
+  await ctx.loader.create({ name: entry("dsh-agent-preset-registry"), config: { default: "standard" } });
+  await ctx.loader.await();
+  await ctx.loader.create({ name: entry("dsh-agent-preset"), config: { id: "standard", plugins: [
+    { id: "persona", name: entry("dsh-persona"), config: { prefix: "标准预设系统提示词 {{model}}" } },
+    { id: "instructions", name: entry("dsh-agent-instructions"), config: { maxBytes: 65536 } },
+  ] } });
+  await ctx.loader.await();
+}
 await ctx.plugin((await load("dsh-subagent")).default, { maxActiveSubagents: 8, maxDepth: 1 });
 await ctx.plugin(await load("dsh-subagent-spawn-in-process"), { providerName: "spawn" });
-let calls = 0;
+let calls = 0, inheritedCalls = 0;
 ctx.tools.register({
   name: "global_tool",
-  description: "must be hidden",
+  description: "宿主已有工具应由 Synapse 继承",
   parameters: { type: "object" },
   output: { schema: { type: "object" }, render: () => [] },
   execute: async () => {
-    throw new Error("global tool must not run");
+    inheritedCalls++;
+    return { result: "宿主继承工具执行成功" };
   },
 });
 const makeHarness = () =>
   new Harness(
-    { services: { get: (name) => ctx.get(name) }, llm },
+    { services: { get: (name) => ctx.get(name) }, llm, dsh: { agentInstructions: { renderAgentInstructions: nativeInstructions.renderAgentInstructions ?? nativeInstructions.renderWorkspaceContext } } },
     () => config,
     { data, profile: data },
     {
@@ -255,6 +293,23 @@ const permissionOf = async (id) => {
   }
 };
 try {
+  {
+    const file = { absolutePath: path.join(data, "SOUL.md"), displayPath: "$DSH_HOME/SOUL.md", content: "聊天人设补充规则" };
+    await harness.run("Synapse 独立补充上下文", "标准预设验证", [], [], undefined, undefined, undefined, "chat:group:123", "chat", undefined, [file]);
+    const messages = requests.at(-1).messages;
+    const text = message => message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
+    if (hasPresets) {
+      assert(messages.some(message => message.role === "system" && text(message).includes("标准预设系统提示词")));
+      assert(messages.some(message => message.role === "user" && message.source.kind === "agent-instructions" && text(message).includes("宿主原生 AGENTS 规则")));
+    }
+    assert(messages.some(message => message.role === "user" && text(message).includes(file.displayPath) && text(message).includes(file.content)));
+    assert(!messages.some(message => message.role === "system" && text(message).includes(file.content)));
+    nativeCalls.push({ name: "global_tool", args: {} });
+    await residentRun("标准预设工具验证", "调用继承工具");
+    assert.equal(inheritedCalls, 1);
+    requests.length = 0;
+    routes.length = 0;
+  }
   assert.equal(
     await residentRun("Shared SOUL {{literal}}", "first resident message"),
     "native DSH response",
@@ -454,6 +509,10 @@ try {
   assert.equal(ctx.workingDirectory.get(parent.session), path.join(data, "workspace", "chat"));
   await harness.run("审查规则", "工作区验证", [], [], undefined, undefined, undefined, "review:foo/bar", "review");
   assert.equal(ctx.workingDirectory.get(ctx.agents.get(requests.at(-1).sessionId).session), path.join(data, "workspace", "review"));
+  if (hasPresets) {
+    assert(JSON.stringify(requests.at(-1).messages).includes("标准预设系统提示词"));
+    assert(requests.at(-1).tools.some(tool => tool.name === "global_tool"));
+  }
   if (hasWorkspaceRegistry) {
     const readHistory = async (id) => {
       const reader = await ctx.sessionPersistence.open(id, "read");
@@ -485,13 +544,15 @@ try {
     assert(workspace.sessionIds.includes(review.id));
   }
   console.log(
-    "真实 DSH 验证通过：通道工作区、图片附件、会话标题、权限、原生 RAG/Skill 子代理与查询工具、JSONL 恢复、取消与重置" + (hasWorkspaceRegistry ? "、归档后新建与工作区列表登记。" : "。"),
+    "真实 DSH 验证通过：标准预设与宿主工具、规则文件注入、通道工作区、图片附件、会话标题、权限、原生 RAG/Skill 子代理与查询工具、JSONL 恢复、取消与重置" + (hasWorkspaceRegistry ? "、归档后新建与工作区列表登记。" : "。"),
   );
 } finally {
   await harness.close();
   await inference.close();
   memory.close();
   await ctx.fiber.dispose();
+  if (originalDshHome === undefined) { delete process.env.DSH_HOME; }
+  else { process.env.DSH_HOME = originalDshHome; }
   assert(path.resolve(data).startsWith(path.resolve(os.tmpdir()) + path.sep));
   await rm(data, { recursive: true, force: true });
 }

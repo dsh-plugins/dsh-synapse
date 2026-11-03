@@ -35,7 +35,7 @@
     "pretest": "npm run build && npm run build:client"
   },
   "peerDependencies": {
-    "@dsh-plugin/dsh-loader": "^2.0.0-dev.41601555194"
+    "@dsh-plugin/dsh-loader": "^2.0.0-dev.41617773595"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
@@ -66,7 +66,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@dsh-plugin/dsh-loader": "2.0.0-dev.41601555194",
+    "@dsh-plugin/dsh-loader": "2.0.0-dev.41617773595",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.10.1",
     "@types/react": "^18.3.31",

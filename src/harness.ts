@@ -11,7 +11,7 @@ import type {
 } from "./types.js";
 import type { McpManager } from "./mcp.js";
 import { SessionBindings } from "./session-bindings.js";
-import { safePath } from "./files.js";
+import { safePath, type InstructionFile } from "./files.js";
 
 export type ApprovalAnswer = "allowed-once" | "rejected" | "cancelled";
 export type AskApproval = (request: {
@@ -22,6 +22,7 @@ export type AskApproval = (request: {
 
 interface Turn {
   system: string;
+  instructions: string;
   selection: { provider: string; model: string; reasoningEffort?: string };
   steps: number;
   output: string;
@@ -63,6 +64,7 @@ export class Harness {
     sessionKey?: string,
     channel: Channel = "chat",
     title?: string,
+    instructions: InstructionFile[] = [],
   ) {
     const task = this.execute(
       system,
@@ -75,6 +77,7 @@ export class Harness {
       sessionKey,
       channel,
       title,
+      instructions,
     );
     this.tasks.add(task);
     void task.finally(() => this.tasks.delete(task)).catch(() => {});
@@ -128,6 +131,7 @@ export class Harness {
     sessionKey?: string,
     channel: Channel = "chat",
     title?: string,
+    instructions: InstructionFile[] = [],
   ): Promise<string> {
     const signal = AbortSignal.any([
       this.shutdown.signal,
@@ -157,6 +161,7 @@ export class Harness {
     const { handle, scope } = resident;
     const turn: Turn = {
       system,
+      instructions: instructions.length ? this.loader.dsh.agentInstructions.renderAgentInstructions(instructions, { maxBytes: 65536 }).text : "",
       selection,
       steps: 0,
       output: "",
@@ -274,7 +279,7 @@ export class Harness {
         "SessionAlreadyOwnedError", "SessionAlreadyExistsError",
         "SessionPersistenceNotFoundError", "SessionPersistenceCorruptionError",
         "SessionOwnershipLostError", "SessionFormatUnsupportedError",
-        "SessionWorkspaceChangedError", "SessionArchivedError",
+        "SessionWorkspaceChangedError", "SessionArchivedError", "SessionPresetChangedError",
       ].includes(error.name) || ["ENOENT", "EACCES", "EPERM"].includes(error.code);
       if (!unavailable) {
         throw error;
@@ -316,6 +321,10 @@ export class Harness {
       key && persistence?.stat
         ? await persistence.stat(id, { signal })
         : undefined;
+    const presets = this.loader.services.get("agentPresets");
+    if (stored && presets && !presets.presetForSession && stored.header.agentPreset !== "standard") {
+      throw Object.assign(new Error("历史会话需要切换到标准预设"), { name: "SessionPresetChangedError" });
+    }
     const workingDirectory = this.loader.services.get("workingDirectory");
     // 工作区成员必须匹配不可变的原始目录；只支持原始目录的宿主也需要新建绑定。
     if (stored && stored.header.cwd !== cwd && (workspaces || !workingDirectory?.set)) {
@@ -340,6 +349,13 @@ export class Harness {
     };
     const setup = async (scope, agent) => {
       resident.scope = scope;
+      // 使用预设的宿主按会话挂载；全局提供标准能力的宿主直接继承插件树。
+      if (presets) {
+        await presets.mount(scope, "standard");
+        if (presets.presetForSession && presets.presetForSession(agent.session) !== "standard") {
+          agent.session.append("agent-preset/selected", { agentPreset: "standard" });
+        }
+      }
       if (stored && workingDirectory?.set) {
         await workingDirectory.set(agent, cwd, signal);
       }
@@ -349,18 +365,21 @@ export class Harness {
         tools = scope.get("tools");
       if (
         !prompt?.section ||
+        !prompt?.context ||
         !prompt?.variable ||
-        !tools?.restrict ||
         !tools?.register
       )
         throw new Error("DSH 提示词或工具作用域服务不可用");
       prompt.variable("synapse_context", () => resident.turn?.system ?? "");
       prompt.section({
-        name: "deployment:persona-prefix",
-        order: 0,
+        name: "dsh-synapse:context",
+        order: 50,
         text: "{{synapse_context}}",
       });
-      tools.restrict({ allow: [] });
+      prompt.context({
+        name: "dsh-synapse:instructions", order: 50, required: true, interpolate: false,
+        text: () => resident.turn?.instructions ?? "",
+      });
       // Older DSH releases select the model through the request waterfall.
       if (!agent.model?.select)
         scope.on("agent/request", async (event, next) => {
@@ -416,7 +435,7 @@ export class Harness {
         })
       : await agents.create({
           sessionId: id,
-          meta: { cwd },
+          meta: { cwd, ...(presets ? { agentPreset: "standard" } : {}) },
           agentOptions: selection,
           signal,
           setup,

@@ -20,7 +20,7 @@ test("可读标题写入原生会话，恢复后更新标题并保留会话记�
   const title = "【群聊】铁砧工艺交流反馈☕（659356928）";
   await run(title);
   const id = host.created[0].agent.id;
-  assert.equal(host.created[0].agent.session.events.at(-1).data.title, title);
+  assert.equal(host.loader.services.get("sessionTitle").get(host.created[0].agent.session).title, title);
   await run(title);
   assert.equal(host.created[0].agent.session.events.filter(event => event.type === "session/title").length, 1);
   await harness.close();
@@ -28,7 +28,7 @@ test("可读标题写入原生会话，恢复后更新标题并保留会话记�
   const renamed = "【群聊】新群名（659356928）";
   await run(renamed);
   assert.equal(host.resumed[0].agent.id, id);
-  assert.equal(host.resumed[0].agent.session.events.at(-1).data.title, renamed);
+  assert.equal(host.loader.services.get("sessionTitle").get(host.resumed[0].agent.session).title, renamed);
 });
 
 test("群与私聊来源信息必须匹配当前会话，Discord 按桥接群显示标题", () => {

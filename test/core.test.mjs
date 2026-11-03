@@ -8,7 +8,7 @@ import { createHmac } from "node:crypto";
 import { createServer } from "node:http";
 import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
 import { template, validateConfig } from "../lib/host/config.js";
-import { SkillStore, promptFor, pathsFor } from "../lib/host/files.js";
+import { SkillStore, instructionFor, pathsFor } from "../lib/host/files.js";
 import { Memory, parseHermes } from "../lib/host/memory.js";
 import {
   verifySignature,
@@ -54,10 +54,10 @@ test("profile prompt overrides home; chat and review use distinct files", async 
   const p = await fixture();
   await writeFile(path.join(p.home, "SOUL.md"), "home soul");
   await writeFile(path.join(p.home, "AGENTS.md"), "home review");
-  assert.equal(await promptFor(p, "chat"), "home soul");
+  assert.equal((await instructionFor(p, "chat")).content, "home soul");
   await writeFile(path.join(p.profile, "SOUL.md"), "profile soul");
-  assert.equal(await promptFor(p, "chat"), "profile soul");
-  assert.equal(await promptFor(p, "review"), "home review");
+  assert.equal((await instructionFor(p, "chat")).content, "profile soul");
+  assert.equal((await instructionFor(p, "review")).content, "home review");
   assert.equal(pathsFor({ baseUrl: pathToFileURL(p.profile + path.sep).href }, {}).home, p.home);
   assert.throws(() => pathsFor({}, {}));
 });
@@ -176,13 +176,14 @@ test("agent injects SOUL, retrieved skill and memory; MCP executes only in chat"
   const c = { ...config(), learnSkills: false, learnMemory: false };
   let calls = 0;
   const host = hostFixture(
-    async ({ variables, tools, restrictions, options }) => {
-      assert.deepEqual(restrictions, [{ allow: [] }]);
+    async ({ variables, tools, restrictions, options, conversation, sections }) => {
+      assert.deepEqual(restrictions, []);
       assert.equal(options.agentOptions.model, "configured-model");
-      assert.match(
-        variables.get("synapse_context")(),
-        /shared soul|Review changes/,
-      );
+      if (options.meta.cwd.endsWith("chat")) {
+        assert(conversation.some(message => message.source?.kind === "runtime-context" && message.content[0].text.includes("shared soul")));
+      }
+      assert(sections.some(section => section.text === "宿主标准系统提示词"));
+      assert(tools.some(tool => tool.name === "standard_read"));
       assert.match(variables.get("synapse_context")(), /durable/);
       const mcp = tools.find((tool) => tool.name === "mcp_0");
       if (mcp) {

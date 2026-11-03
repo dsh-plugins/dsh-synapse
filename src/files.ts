@@ -1,4 +1,4 @@
-import type { PluginPaths, Skill } from "./types.js";
+import type { Channel, PluginPaths, Skill } from "./types.js";
 import {
   mkdir,
   readFile,
@@ -75,18 +75,20 @@ export async function atomicWrite(file, content, signal?: AbortSignal) {
     });
   }
 }
-export async function promptFor(paths, channel) {
+/** 通道补充规则保留文件来源，作为普通规则上下文注入。 */
+export interface InstructionFile { absolutePath: string; displayPath: string; content: string }
+
+export async function instructionFor(paths: PluginPaths, channel: Channel, signal?: AbortSignal): Promise<InstructionFile | undefined> {
   const name = channel === "review" ? "AGENTS.md" : "SOUL.md";
   for (const root of [paths.profile, paths.home]) {
     try {
-      return await readFile(await safePath(root, name), "utf8");
+      const absolutePath = await safePath(root, name);
+      const displayPath = `${root === paths.profile ? "<profile>" : "$DSH_HOME"}/${name}`;
+      return { absolutePath, displayPath, content: await readFile(absolutePath, { encoding: "utf8", signal }) };
     } catch (e) {
-      if (e.code !== "ENOENT") throw e;
+      if (e.code !== "ENOENT") { throw e; }
     }
   }
-  return channel === "review"
-    ? "Review changes for concrete defects. Explain evidence and actionable fixes."
-    : "你是一位友善、准确的聊天助手。";
 }
 export function skillName(name) {
   if (
