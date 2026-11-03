@@ -268,6 +268,7 @@ export class Harness {
       await this.bindings.reset(key, signal);
       // 只替换本通道绑定，不释放其他调用方持有的会话；新建失败直接返回错误。
       const replacement = await this.create(selection, signal, key);
+      this.residents.set(key, replacement);
       onEvent("session.replaced", {
         previousSession: previous.id,
         session: replacement.handle.agent.id,

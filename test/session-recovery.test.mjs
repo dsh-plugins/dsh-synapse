@@ -78,3 +78,14 @@ test("新会话创建失败时直接返回错误，不循环创建或重试其�
   await assert.rejects(f.run(), /新会话存储不可用/);
   assert.equal(attempts, 1);
 });
+
+test("会话替换通知失败时新句柄仍受托管，后续消息和关闭可以正常处理", async (t) => {
+  const f = await fixture(t);
+  f.agents.resume = async () => { throw Object.assign(new Error("被占用"), { name: "SessionAlreadyOwnedError" }); };
+  await assert.rejects(f.run(undefined, () => { throw new Error("通知发送失败"); }), /通知发送失败/);
+  const replacement = f.host.created[1];
+  assert.equal(await f.run(), "done");
+  assert.equal(f.host.created.length, 2);
+  await f.reload();
+  assert(f.host.disposed.includes(replacement.agent.id));
+});
