@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { pathToFileURL } from "node:url";
 import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
 import { ConfigStore } from "../node_modules/@dsh-plugin/dsh-loader/dist/services/config.js";
 import { template } from "../lib/host/config.js";
@@ -81,7 +82,7 @@ test("real loader migrates legacy JSON, preserves live commands, backs up and re
     JSON.stringify({ groups: [789], requireMention: true }),
   );
   const store = new ConfigStore(profile);
-  const ctx = { dshLoader: { config: store } };
+  const ctx = { baseUrl: pathToFileURL(profile + path.sep).href, dshLoader: { config: store } };
   const handle = await registerConfig(ctx);
   try {
     const { value: c, revision } = handle.get();

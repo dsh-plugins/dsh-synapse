@@ -4,6 +4,7 @@ import path from "node:path";
 import type { HostAPI } from "@dsh-plugin/dsh-loader";
 import type {
   ConfigSource,
+  Channel,
   PluginPaths,
   ChatMessage,
   AgentEvent,
@@ -60,6 +61,7 @@ export class Harness {
     onEvent: AgentEvent = () => {},
     ask?: AskApproval,
     sessionKey?: string,
+    channel: Channel = "chat",
   ) {
     const task = this.execute(
       system,
@@ -70,6 +72,7 @@ export class Harness {
       onEvent,
       ask,
       sessionKey,
+      channel,
     );
     this.tasks.add(task);
     void task.finally(() => this.tasks.delete(task)).catch(() => {});
@@ -121,6 +124,7 @@ export class Harness {
     onEvent: AgentEvent,
     ask?: AskApproval,
     sessionKey?: string,
+    channel: Channel = "chat",
   ): Promise<string> {
     const signal = AbortSignal.any([
       this.shutdown.signal,
@@ -128,12 +132,12 @@ export class Harness {
       ...(callerSignal ? [callerSignal] : []),
     ]);
     signal.throwIfAborted();
-    const defaults = this.loader.services.get("agentDefaultModel");
-    if (!defaults?.currentSelection)
-      throw new Error("DSH Agent / 默认模型服务不可用，请检查宿主加载状态");
-    const selection = defaults.currentSelection();
-    if (!selection?.provider || !selection?.model)
-      throw new Error("请先在 DSH 的模型设置中选择默认模型");
+    const config = this.config();
+    const selection = (channel === "review" ? config.reviewModel : config.chatModel)
+      ?? this.loader.services.get("agentDefaultModel")?.currentSelection?.();
+    if (!selection?.provider || !selection?.model) {
+      throw new Error("请为此通道选择模型，或在 DSH 模型设置中选择默认模型");
+    }
     const content = await this.content(input);
     const resident = sessionKey
       ? (this.residents.get(sessionKey) ??

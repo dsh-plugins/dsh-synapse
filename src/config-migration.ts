@@ -103,7 +103,7 @@ export async function registerConfig(ctx: SynapseContext) {
   let migrated: SynapseConfig;
   if (legacy) {
     migrated = migrateConfig(old);
-    const paths = pathsFor(ctx, migrated);
+    const paths = pathsFor(ctx);
     const live = [];
     for (const f of featureFiles(migrated)) {
       const file = await safePath(

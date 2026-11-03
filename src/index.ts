@@ -23,7 +23,7 @@ export async function createService(
   onError: ErrorSink,
 ) {
   validateConfig(c);
-  const paths = pathsFor(ctx, c);
+  const paths = pathsFor(ctx);
   await safePath(paths.profile, "data", "dsh-synapse");
   await mkdir(paths.data, { recursive: true });
   const config = () => c,
@@ -103,7 +103,7 @@ export async function apply(ctx: SynapseContext) {
     enqueue(async () => {
       if (disposed) return;
       validateConfig(value);
-      pathsFor(ctx, value);
+      pathsFor(ctx);
       if (service) {
         const old = service;
         service = null;

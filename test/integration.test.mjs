@@ -6,7 +6,7 @@ import { WebSocketServer } from "ws";
 import { once } from "node:events";
 import path from "node:path";
 import os from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
 import { template } from "../lib/host/config.js";
 import { McpManager } from "../lib/host/mcp.js";
@@ -64,8 +64,6 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
     ...defaultsFor(template.fields),
     enabled: true,
     ragEnabled: false,
-    profileDir: profile,
-    homeDir: home,
   };
   c.modules.command.groups = [123];
   Object.assign(c.modules.chat, {
@@ -227,13 +225,12 @@ test("loader 2.0 lifecycle registers, authenticates routes and disposes services
   await mkdir(profile, { recursive: true });
   const c = {
     ...defaultsFor(template.fields),
-    profileDir: profile,
-    homeDir: home,
   };
   const routes = new Map(),
     cleanups = [];
   let registered, watched;
   const ctx = {
+    baseUrl: pathToFileURL(profile + path.sep).href,
     effect(fn) {
       cleanups.push(fn());
     },

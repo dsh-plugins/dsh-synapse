@@ -27,11 +27,23 @@ export const template = defineConfig({
   packageName: "@dsh-plugin/dsh-synapse",
   title: "Synapse · 通道与记忆",
   description:
-    "聊天、审查和自总结使用当前 DSH 的默认模型与 Agent 运行时。各功能由 dsh-loader 在此卡片内统一配置和保存。",
+    "聊天、审查和自总结使用所选模型与 DSH Agent 运行时。各功能由 dsh-loader 在此卡片内统一配置和保存。",
   fields: [
     flag("enabled", "启用机器人"),
-    text("profileDir", "当前 profile 绝对路径（自动定位失败时填写）"),
-    text("homeDir", "DSH Home 绝对路径（默认 profile 上两级）"),
+    {
+      type: "model",
+      key: "chatModel",
+      label: "默认聊天模型",
+      description: "用于聊天及聊天自总结，留空时使用 DSH 默认模型。",
+      default: null,
+    },
+    {
+      type: "model",
+      key: "reviewModel",
+      label: "默认审查模型",
+      description: "用于 GitHub 审查及审查自总结，留空时使用 DSH 默认模型。",
+      default: null,
+    },
     collapsibleGroup("OneBot · NapCat / Snowluma", [
       text("httpUrl", "HTTP 地址", "http://127.0.0.1:3000"),
       text("wsUrl", "WebSocket 地址", "ws://127.0.0.1:3001"),

@@ -1,5 +1,6 @@
 import type {
   ConfigSource,
+  Channel,
   PluginPaths,
   ErrorSink,
   ChatMessage,
@@ -50,7 +51,7 @@ export class Agent {
   }
   async run(
     input,
-    channel = "chat",
+    channel: Channel = "chat",
     history: ChatMessage[] = [],
     signal?: AbortSignal,
     onEvent: AgentEvent = () => {},
@@ -79,6 +80,7 @@ export class Agent {
           onEvent,
           ask,
           sessionKey,
+          channel,
         );
         await this.learn(
           typeof input === "string" ? input : JSON.stringify(input),
@@ -110,6 +112,10 @@ export class Agent {
       [],
       [],
       signal,
+      undefined,
+      undefined,
+      undefined,
+      channel,
     );
     const parsed = JSON.parse(reply.replace(/^```(?:json)?\s*|\s*```$/g, ""));
     if (c.learnMemory && c.ragEnabled && Array.isArray(parsed.memories))

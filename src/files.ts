@@ -9,21 +9,27 @@ import {
   unlink,
 } from "node:fs/promises";
 import path from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { randomUUID, createHash } from "node:crypto";
 export const ID = "dsh-synapse";
-export function pathsFor(ctx, c) {
-  let profile = c.profileDir;
+export function pathsFor(ctx, env: { DSH_HOME?: string } = process.env): PluginPaths {
   const url =
     ctx.baseUrl ??
     ctx.get?.("loader")?.ctx?.baseUrl ??
     ctx.get?.("loader")?.config?.baseUrl;
-  if (!profile && typeof url === "string" && url.startsWith("file:"))
-    profile = fileURLToPath(new URL(".", url));
-  if (!profile || !path.isAbsolute(profile))
-    throw new Error("无法定位当前 profile；请填写 profileDir 绝对路径");
-  const home = c.homeDir || path.resolve(profile, "../..");
-  if (!path.isAbsolute(home)) throw new Error("homeDir 必须是绝对路径");
+  if (typeof url !== "string" || !url.startsWith("file:")) {
+    throw new Error("DSH 宿主未提供当前 profile 的文件地址");
+  }
+  const profile = path.resolve(fileURLToPath(new URL(".", url)));
+  let home = path.resolve(profile, "../..");
+  const configuredHome = env.DSH_HOME;
+  if (configuredHome?.trim()) {
+    const expanded = configuredHome === "~" || /^~[\\/]/.test(configuredHome)
+      ? path.join(homedir(), configuredHome.slice(2))
+      : configuredHome;
+    home = path.resolve(expanded);
+  }
   return {
     profile,
     home,

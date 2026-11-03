@@ -10,7 +10,7 @@
 
 ## 能做什么
 
-Synapse 使用你在 DSH 中选好的默认模型，处理聊天和 GitHub 审查：
+Synapse 支持分别选择默认聊天模型和默认审查模型，并为对应通道的自总结使用同一个模型。留空时使用 DSH 默认模型。
 
 - 在 QQ 群聊、私聊与 Discord 频道中聊天，支持图片、回复引用、表情回应、进度卡片与命令审批，也可以把 QQ 群和 Discord 频道双向连通。
 - 处理入群申请、黑名单、欢迎语、戳一戳，支持 GitHub 与 B 站订阅、Minecraft 与 Modrinth 查询、版本跟踪、括号匹配、峰谷提醒和 Markdown 图片渲染。
@@ -23,7 +23,7 @@ Synapse 使用你在 DSH 中选好的默认模型，处理聊天和 GitHub 审�
 
 1. 打开 DSH 插件市场，搜索并安装 `@dsh-plugin/dsh-loader@next` 和 `@dsh-plugin/dsh-synapse@next`。
 2. 打开插件设置页面，在配置卡片中按需填写各项设置。如果需要生成图片卡片，请填入本机 Chrome 或 Chromium 的可执行文件路径。
-3. 在 DSH 的模型设置中选好默认模型，再按下文接入需要的通道。
+3. 在配置卡片中选择默认聊天模型和默认审查模型，支持选择提供商、模型与推理等级。留空时使用 DSH 默认模型，再按下文接入需要的通道。
 
 ## QQ 与 Discord 接入
 
@@ -50,6 +50,8 @@ DSH 启用会话持久化时，重载后可以继续原来的对话；重载前�
 修改只影响之后新建或 reset 后的对话，已有和重载恢复的对话保留原权限。可调用的 MCP 工具仍由下文的允许列表决定。
 
 ## 人设、记忆与 Skill
+
+主目录读取 `DSH_HOME` 环境变量，当前 profile 从宿主运行上下文定位。未设置 `DSH_HOME` 时，主目录使用 profile 的上两级目录。
 
 `<dsh_home>/SOUL.md` 设置默认聊天人设，`<dsh_home>/AGENTS.md` 设置 GitHub 审查规则。在 `<dsh_home>/profiles/<profile>/` 下放入同名文件，就会优先使用当前 profile 的版本。修改后在下一次请求中生效，无需重启。
 

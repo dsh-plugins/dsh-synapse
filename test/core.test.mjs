@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
+import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { createHmac } from "node:crypto";
 import { createServer } from "node:http";
@@ -57,7 +58,7 @@ test("profile prompt overrides home; chat and review use distinct files", async 
   await writeFile(path.join(p.profile, "SOUL.md"), "profile soul");
   assert.equal(await promptFor(p, "chat"), "profile soul");
   assert.equal(await promptFor(p, "review"), "home review");
-  assert.equal(pathsFor({}, { profileDir: p.profile }).home, p.home);
+  assert.equal(pathsFor({ baseUrl: pathToFileURL(p.profile + path.sep).href }, {}).home, p.home);
   assert.throws(() => pathsFor({}, {}));
 });
 test("skills import, edit conflicts, inheritance, retrieval, deletion and traversal", async () => {

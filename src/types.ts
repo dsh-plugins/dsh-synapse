@@ -1,4 +1,5 @@
 import type { HostAPI, CordisContext } from "@dsh-plugin/dsh-loader";
+import type { ConfigModelValue } from "@dsh-plugin/dsh-loader/config";
 export type Channel = "chat" | "review";
 export interface PluginPaths {
   profile: string;
@@ -19,8 +20,8 @@ export interface McpSpec {
 }
 export interface SynapseConfig {
   enabled: boolean;
-  profileDir: string;
-  homeDir: string;
+  chatModel: ConfigModelValue | null;
+  reviewModel: ConfigModelValue | null;
   httpUrl: string;
   wsUrl: string;
   httpToken: string;
