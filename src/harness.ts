@@ -144,7 +144,7 @@ export class Harness {
     const content = await this.content(input);
     const resident = sessionKey
       ? (this.residents.get(sessionKey) ??
-        (await this.create(selection, signal, sessionKey)))
+        (await this.acquire(selection, signal, sessionKey, onEvent)))
       : await this.create(selection, signal);
     if (sessionKey) this.residents.set(sessionKey, resident);
     if (resident.turn) throw new Error("同一会话必须通过消息队列串行执行");
@@ -248,6 +248,32 @@ export class Harness {
       for (const release of releases.reverse()) release();
       resident.turn = undefined;
       if (!sessionKey) await handle.dispose();
+    }
+  }
+
+  private async acquire(selection, signal: AbortSignal, key: string, onEvent: AgentEvent) {
+    try {
+      return await this.create(selection, signal, key);
+    } catch (error) {
+      signal.throwIfAborted();
+      const unavailable = [
+        "SessionAlreadyOwnedError", "SessionAlreadyExistsError",
+        "SessionPersistenceNotFoundError", "SessionPersistenceCorruptionError",
+        "SessionOwnershipLostError", "SessionFormatUnsupportedError",
+      ].includes(error.name) || ["ENOENT", "EACCES", "EPERM"].includes(error.code);
+      if (!unavailable) {
+        throw error;
+      }
+      const previous = await this.bindings.get(key);
+      await this.bindings.reset(key, signal);
+      // 只替换本通道绑定，不释放其他调用方持有的会话；新建失败直接返回错误。
+      const replacement = await this.create(selection, signal, key);
+      onEvent("session.replaced", {
+        previousSession: previous.id,
+        session: replacement.handle.agent.id,
+        reason: error.name,
+      });
+      return replacement;
     }
   }
 

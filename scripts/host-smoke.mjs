@@ -14,6 +14,7 @@ import { Memory } from "../lib/host/memory.js";
 import { SkillStore } from "../lib/host/files.js";
 import { chatTools } from "../lib/host/chat-tools.js";
 import { Inference } from "../lib/host/runtime.js";
+import { SessionBindings } from "../lib/host/session-bindings.js";
 if (!process.argv[2])
   throw new Error(
     "Usage: node scripts/host-smoke.mjs <installed DSH package.json>",
@@ -344,6 +345,18 @@ try {
     await ctx.plugin(autoPlugin.default ?? autoPlugin);
     await harness.run("context", "new auto session");
     assert.equal(await permissionOf(requests.at(-1).sessionId), "auto");
+  }
+  config.sessionPermission = "read-only";
+  await harness.close();
+  const binding = await new SessionBindings(data).get("chat:group:123");
+  const occupied = await ctx.sessionPersistence.open(binding.id, "write");
+  harness = makeHarness();
+  try {
+    await residentRun("恢复聊天", "会话被占用后继续");
+    assert.notEqual(requests.at(-1).sessionId, binding.id);
+    assert((await occupied.read()).events.length > 0);
+  } finally {
+    await occupied.close();
   }
   console.log(
     "真实 DSH 验证通过：图片附件、会话标题、权限、原生 RAG/Skill 与查询工具、JSONL 恢复、取消与重置。",

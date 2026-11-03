@@ -136,6 +136,7 @@ export function hostFixture(execute = async () => "done") {
       },
     };
   }
+  const agents = { create, resume: create };
   const loader = {
     llm: {
       createUserMessage: (input) => ({
@@ -147,7 +148,7 @@ export function hostFixture(execute = async () => "done") {
     services: {
       get: (name) =>
         ({
-          agents: { create, resume: create },
+          agents,
           permissionPresets: permissions,
           sessionTitle: {
             get: (session) => session.events.filter((e) => e.type === "session/title").at(-1)?.data,

@@ -69,11 +69,12 @@ export class SessionBindings {
     await atomicWrite(file, JSON.stringify({ key, id }));
     return { id, bootstrap: true };
   }
-  async reset(key: string) {
+  async reset(key: string, signal?: AbortSignal) {
     const id = `synapse-${randomUUID()}`;
     await atomicWrite(
       await this.file(key),
       JSON.stringify({ key, id, bootstrap: false }),
+      signal,
     );
   }
 }
