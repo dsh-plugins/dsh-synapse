@@ -129,8 +129,10 @@ export class Agent {
       undefined,
       channel,
     );
+    signal?.throwIfAborted();
     const parsed = JSON.parse(reply.replace(/^```(?:json)?\s*|\s*```$/g, ""));
-    if (c.learnMemory && c.ragEnabled && Array.isArray(parsed.memories))
+    const current = this.config();
+    if (current.learnMemory && current.ragEnabled && Array.isArray(parsed.memories)) {
       await this.memory.addMany(
         parsed.memories
           .filter((t) => typeof t === "string" && t.trim())
@@ -140,9 +142,11 @@ export class Agent {
             source: "summary",
             text: text.slice(0, 2000),
           })),
+        signal,
       );
+    }
     if (
-      c.learnSkills &&
+      this.config().learnSkills &&
       parsed.skill &&
       typeof parsed.skill.title === "string" &&
       typeof parsed.skill.steps === "string"
@@ -153,8 +157,9 @@ export class Agent {
         .digest("hex")
         .slice(0, 16);
       const name = `auto-${channel}-${hash}`;
-      if (!(await this.skills.list()).some((x) => x.name === name))
-        await this.skills.save(name, content);
+      if (!(await this.skills.list()).some((x) => x.name === name)) {
+        await this.skills.save(name, content, null, signal);
+      }
     }
   }
 }

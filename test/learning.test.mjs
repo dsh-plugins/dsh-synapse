@@ -78,3 +78,33 @@ test("记忆与 Skill 写入遵守开关、取消和通道隔离", async (t) => 
   c.ragEnabled = false;
   assert(!learningTools(() => c, memory, skills, "review").some((tool) => tool.name.startsWith("synapse_memory_")));
 });
+
+test("自动总结在模型返回后复核开关，并在嵌入期间取消写入", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "synapse-learning-"));
+  const paths = { home, profile: home, data: home, skills: path.join(home, "skills") };
+  let c = defaultsFor(template.fields);
+  let started, release;
+  const ready = new Promise((resolve) => { started = resolve; });
+  const embedding = new Promise((resolve) => { release = resolve; });
+  const memory = new Memory(":memory:", { embed: async () => { started(); return embedding; } }, () => c);
+  const skills = new SkillStore(paths);
+  let switchOff = true;
+  const host = hostFixture(async () => {
+    if (switchOff) { c = { ...c, learnMemory: false, learnSkills: false }; }
+    return '{"memories":["长期事项"],"skill":{"title":"流程","steps":"验证步骤"}}';
+  });
+  const agent = new Agent({ loader: host.loader, config: () => c, paths, memory, skills, mcp: {} });
+  t.after(async () => { release([1, ...Array(511).fill(0)]); await agent.close(); memory.close(); await rm(home, { recursive: true, force: true }); });
+  await agent.learn("example", "done", "review");
+  assert.equal(memory.list("review").length, 0);
+  assert.equal((await skills.list()).length, 0);
+  switchOff = false;
+  c = { ...c, learnMemory: true, learnSkills: true };
+  const controller = new AbortController();
+  const cancelled = assert.rejects(agent.learn("example", "done", "review", controller.signal), /abort/i);
+  await ready;
+  controller.abort();
+  await cancelled;
+  assert.equal(memory.list("review").length, 0);
+  assert.equal((await skills.list()).length, 0);
+});
