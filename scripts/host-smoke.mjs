@@ -174,6 +174,24 @@ const persistencePlugin = await load("dsh-session-persistence-jsonl");
 await ctx.plugin(persistencePlugin.default ?? persistencePlugin, {
   root: path.join(data, "native-history"),
 });
+let hasWorkspaceRegistry = true;
+try {
+  require.resolve("@deepseek-ai/dsh-workspace");
+} catch (error) {
+  if (error.code !== "MODULE_NOT_FOUND") { throw error; }
+  hasWorkspaceRegistry = false;
+}
+if (hasWorkspaceRegistry) {
+  for (const [name, settings] of [
+    ["dsh-storage", {}],
+    ["dsh-storage-json", { root: path.join(data, "storage") }],
+    ["dsh-storage-domain", { backend: "json" }],
+    ["dsh-workspace", {}],
+  ]) {
+    const plugin = await load(name);
+    await ctx.plugin(plugin.default ?? plugin, settings);
+  }
+}
 await ctx.plugin((await load("dsh-subagent")).default, { maxActiveSubagents: 8, maxDepth: 1 });
 await ctx.plugin(await load("dsh-subagent-spawn-in-process"), { providerName: "spawn" });
 let calls = 0;
@@ -436,8 +454,38 @@ try {
   assert.equal(ctx.workingDirectory.get(parent.session), path.join(data, "workspace", "chat"));
   await harness.run("审查规则", "工作区验证", [], [], undefined, undefined, undefined, "review:foo/bar", "review");
   assert.equal(ctx.workingDirectory.get(ctx.agents.get(requests.at(-1).sessionId).session), path.join(data, "workspace", "review"));
+  if (hasWorkspaceRegistry) {
+    const readHistory = async (id) => {
+      const reader = await ctx.sessionPersistence.open(id, "read");
+      try {
+        const stored = await reader.read();
+        return stored.events ?? stored;
+      } finally {
+        await reader.close();
+      }
+    };
+    for (const live of [true, false]) {
+      const old = await new SessionBindings(data).get("chat:group:123");
+      await ctx.workspaceRegistry.archiveSession(old.id);
+      await ctx.sessionPersistence.flush();
+      const before = await readHistory(old.id);
+      assert(before.length > 0);
+      if (!live) { await harness.close(); harness = makeHarness(); }
+      await residentRun("恢复聊天", "归档后继续");
+      const current = await new SessionBindings(data).get("chat:group:123");
+      assert.notEqual(current.id, old.id);
+      assert.equal(requests.at(-1).sessionId, current.id);
+      assert(ctx.workspaceRegistry.archivedSessionIds.includes(old.id));
+      assert.deepEqual(await readHistory(old.id), before);
+      const workspace = await ctx.workspaceRegistry.resolveByPath(path.join(data, "workspace", "chat"));
+      assert(workspace.sessionIds.includes(current.id));
+    }
+    const review = await new SessionBindings(data).get("review:foo/bar");
+    const workspace = await ctx.workspaceRegistry.resolveByPath(path.join(data, "workspace", "review"));
+    assert(workspace.sessionIds.includes(review.id));
+  }
   console.log(
-    "真实 DSH 验证通过：通道工作区、图片附件、会话标题、权限、原生 RAG/Skill 子代理与查询工具、JSONL 恢复、取消与重置。",
+    "真实 DSH 验证通过：通道工作区、图片附件、会话标题、权限、原生 RAG/Skill 子代理与查询工具、JSONL 恢复、取消与重置" + (hasWorkspaceRegistry ? "、归档后新建与工作区列表登记。" : "。"),
   );
 } finally {
   await harness.close();

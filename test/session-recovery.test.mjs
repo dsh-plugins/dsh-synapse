@@ -8,9 +8,9 @@ import { template } from "../lib/host/config.js";
 import { Harness } from "../lib/host/harness.js";
 import { hostFixture } from "./fixtures/host.mjs";
 
-async function fixture(t) {
+async function fixture(t, { live = false, workspaces = false } = {}) {
   const data = await mkdtemp(path.join(os.tmpdir(), "synapse-recovery-"));
-  const host = hostFixture();
+  const host = hostFixture(undefined, { workspaces });
   const config = defaultsFor(template.fields);
   const create = () => new Harness(host.loader, () => config, { data, profile: data }, {});
   let harness = create();
@@ -19,9 +19,58 @@ async function fixture(t) {
   await run();
   const oldId = host.created[0].agent.id;
   const reload = async () => { await harness.close(); harness = create(); };
-  await reload();
+  if (!live) { await reload(); }
   return { host, oldId, run, reload, agents: host.loader.services.get("agents") };
 }
+
+test("归档会话在驻留和重载后均更换绑定，保留归档历史并登记新工作区", async (t) => {
+  for (const live of [true, false]) {
+    await t.test(live ? "驻留会话" : "重载恢复", async (t) => {
+      const f = await fixture(t, { live, workspaces: true });
+      const registry = f.host.workspaceRegistry;
+      await registry.archiveSession(f.oldId);
+      const oldHistory = structuredClone(f.host.stored.get(f.oldId));
+      const events = [];
+      assert.equal(await f.run(undefined, (type, value) => events.push({ type, value })), "done");
+      const next = f.host.created.at(-1);
+      assert.notEqual(next.agent.id, f.oldId);
+      assert.equal(next.injected.length, 0);
+      assert.deepEqual(f.host.stored.get(f.oldId), oldHistory);
+      assert(registry.archivedSessionIds.includes(f.oldId));
+      assert(!registry.archivedSessionIds.includes(next.agent.id));
+      assert.equal(events.find(event => event.type === "session.replaced").value.reason, "SessionArchivedError");
+      assert(registry.list().find(workspace => workspace.path === next.agent.session.header.cwd).sessionIds.includes(next.agent.id));
+      await f.run();
+      assert.equal(f.host.created.length, 2);
+      await f.reload();
+      await f.run();
+      assert.equal(f.host.resumed.at(-1).agent.id, next.agent.id);
+    });
+  }
+});
+
+test("归档会话遇到已取消请求时不创建新绑定", async (t) => {
+  const f = await fixture(t, { live: true, workspaces: true });
+  await f.host.workspaceRegistry.archiveSession(f.oldId);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(f.run(controller.signal), /abort/i);
+  assert.equal(f.host.created.length, 1);
+  assert.equal(f.host.disposed.length, 0);
+});
+
+test("消息提交期间发生归档时说明停止原因，不重放本轮且下一条消息新建会话", async (t) => {
+  const f = await fixture(t, { live: true, workspaces: true });
+  const agent = f.host.created[0].agent, followup = agent.followup;
+  agent.followup = message => {
+    void f.host.workspaceRegistry.archiveSession(f.oldId);
+    followup(message);
+  };
+  await assert.rejects(f.run(), /会话已归档.*下一条消息将自动新建会话/);
+  assert.equal(f.host.created.length, 1);
+  assert.equal(await f.run(), "done");
+  assert.equal(f.host.created.length, 2);
+});
 
 test("被占用的会话自动更换绑定，后续消息与重载继续使用新会话", async (t) => {
   const f = await fixture(t);

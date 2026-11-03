@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 // Native lifecycle contract fixture; durable history survives owner disposal.
-export function hostFixture(execute = async () => "done", { legacySubagents = false } = {}) {
+export function hostFixture(execute = async () => "done", { legacySubagents = false, workspaces = false } = {}) {
   const created = [],
     resumed = [],
     disposed = [],
@@ -27,6 +27,26 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
       listener(data);
     }
   };
+  const archived = new Set(), workspaceEntries = new Map();
+  const workspaceRegistry = workspaces ? {
+    get archivedSessionIds() { return [...archived]; },
+    archiveSession: async (id) => { archived.add(id); },
+    list: () => [...workspaceEntries.values()],
+    async create(cwd) {
+      if (!workspaceEntries.has(cwd)) {
+        const members = new Set();
+        workspaceEntries.set(cwd, {
+          path: cwd,
+          get sessionIds() { return [...members]; },
+          async attachSession(id) {
+            if (headers.get(id)?.cwd !== cwd) { throw new Error("会话原始目录与工作区不匹配"); }
+            members.add(id);
+          },
+        });
+      }
+      return workspaceEntries.get(cwd);
+    },
+  } : undefined;
   const permissions = {
     names: ["read-only", "workspace-write", "danger-full-access", "auto"],
     set(session, preset) {
@@ -110,9 +130,10 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
         task = (async () => {
           try {
             conversation.push(message);
-            await listeners.get("agent/pre-step")?.({ agent }, async () => ({
-              kind: "enter",
+            const admission = await listeners.get("agent/pre-step")?.({ agent }, async () => ({
+              kind: archived.has(id) ? "reject" : "enter",
             }));
+            if (admission?.kind === "reject") { return; }
             const output = await execute({
               options,
               message,
@@ -229,6 +250,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
         ({
           agents,
           subagents,
+          workspaceRegistry,
           workingDirectory: {
             get: (session) => session.events.filter(event => event.type === "working-directory/change").at(-1)?.data.cwd ?? session.header.cwd,
             set: async (agent, cwd, signal) => {
@@ -258,6 +280,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
   };
   return {
     loader,
+    workspaceRegistry,
     created,
     resumed,
     disposed,

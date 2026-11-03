@@ -40,6 +40,8 @@ Send `stop` or `停止` to cancel the current reply and let the next queued mess
 
 When session persistence is enabled in DSH, reloading can restore the conversation. Unfinished chat messages must be sent again after a reload.
 
+会话被归档后，Synapse 会在下一条消息到来时新建会话并保存新绑定，保留旧会话的归档状态与历史。DSH `0.2.2` 的工作区及会话也会显式登记到宿主工作区列表。执行期间归档会话时不会自动重放工具操作，下一条消息会使用新会话。
+
 You can adjust conversation permissions under "Task Execution Limits → Permissions for all new Synapse sessions":
 
 - **Read Only** (default)

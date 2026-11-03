@@ -142,6 +142,12 @@ export class Harness {
       throw new Error("请为此通道选择模型，或在 DSH 模型设置中选择默认模型");
     }
     const content = await this.content(input);
+    signal.throwIfAborted();
+    const cached = sessionKey && this.residents.get(sessionKey);
+    if (cached && this.isArchived(cached.handle.agent.id)) {
+      await cached.handle.dispose();
+      this.residents.delete(sessionKey);
+    }
     const resident = sessionKey
       ? (this.residents.get(sessionKey) ??
         (await this.acquire(selection, signal, sessionKey, onEvent, channel)))
@@ -240,8 +246,12 @@ export class Harness {
       await this.loader.services.get("sessions")?.flush?.(handle.agent.session);
       signal.throwIfAborted();
       if (turn.error) throw turn.error;
-      if (!turn.output)
+      if (!turn.output) {
+        if (this.isArchived(handle.agent.id)) {
+          throw new Error(`DSH 会话已归档，下一条消息将自动新建会话（${handle.agent.id}）`);
+        }
         throw new Error("DSH 任务未返回文本结果，请检查宿主会话日志");
+      }
       return turn.output;
     } finally {
       signal.removeEventListener("abort", abort);
@@ -249,6 +259,10 @@ export class Harness {
       resident.turn = undefined;
       if (!sessionKey) await handle.dispose();
     }
+  }
+
+  private isArchived(id: string): boolean {
+    return this.loader.services.get("workspaceRegistry")?.archivedSessionIds.includes(id) ?? false;
   }
 
   private async acquire(selection, signal: AbortSignal, key: string, onEvent: AgentEvent, channel: Channel) {
@@ -260,7 +274,7 @@ export class Harness {
         "SessionAlreadyOwnedError", "SessionAlreadyExistsError",
         "SessionPersistenceNotFoundError", "SessionPersistenceCorruptionError",
         "SessionOwnershipLostError", "SessionFormatUnsupportedError",
-        "SessionWorkspaceChangedError",
+        "SessionWorkspaceChangedError", "SessionArchivedError",
       ].includes(error.name) || ["ENOENT", "EACCES", "EPERM"].includes(error.code);
       if (!unavailable) {
         throw error;
@@ -293,14 +307,18 @@ export class Harness {
       ? await this.bindings.get(key)
       : { id: randomUUID(), bootstrap: true };
     const id = binding.id;
+    const workspaces = this.loader.services.get("workspaceRegistry");
+    if (this.isArchived(id)) {
+      throw Object.assign(new Error("绑定的 DSH 会话已归档"), { name: "SessionArchivedError" });
+    }
     const persistence = this.loader.services.get("sessionPersistence");
     const stored =
       key && persistence?.stat
         ? await persistence.stat(id, { signal })
         : undefined;
     const workingDirectory = this.loader.services.get("workingDirectory");
-    // 旧宿主只支持不可变的原始目录；保留旧记录并新建绑定，避免继续使用错误工作区。
-    if (stored && !workingDirectory?.set && stored.header.cwd !== cwd) {
+    // 工作区成员必须匹配不可变的原始目录；只支持原始目录的宿主也需要新建绑定。
+    if (stored && stored.header.cwd !== cwd && (workspaces || !workingDirectory?.set)) {
       throw Object.assign(new Error("历史会话需要切换到通道工作区"), { name: "SessionWorkspaceChangedError" });
     }
     const preset = this.config().sessionPermission;
@@ -403,6 +421,19 @@ export class Harness {
           signal,
           setup,
         });
+    try {
+      if (workspaces) {
+        const workspace = await workspaces.create(cwd);
+        await workspace.attachSession(resident.handle.agent.id);
+      }
+    } catch (error) {
+      try {
+        await resident.handle.dispose();
+      } catch (cleanup) {
+        throw new AggregateError([error, cleanup], "工作区登记失败，且会话清理失败");
+      }
+      throw error;
+    }
     return resident;
   }
   async reset(key: string) {
