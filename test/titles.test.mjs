@@ -7,6 +7,7 @@ import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
 import { template } from "../lib/host/config.js";
 import { Harness } from "../lib/host/harness.js";
 import { hostFixture } from "./fixtures/host.mjs";
+import { chatRunContext } from "../lib/host/session-bindings.js";
 
 test("可读标题写入原生会话，恢复后更新标题并保留会话记录", async (t) => {
   const data = await mkdtemp(path.join(os.tmpdir(), "synapse-titles-"));
@@ -28,4 +29,12 @@ test("可读标题写入原生会话，恢复后更新标题并保留会话记�
   await run(renamed);
   assert.equal(host.resumed[0].agent.id, id);
   assert.equal(host.resumed[0].agent.session.events.at(-1).data.title, renamed);
+});
+
+test("群与私聊来源信息必须匹配当前会话，Discord 按桥接群显示标题", () => {
+  assert.throws(() => chatRunContext("chat:group:123", { type: "group", groupId: "456", userId: "1" }), /不匹配/);
+  assert.throws(() => chatRunContext("chat:user:1", { type: "user", userId: "2" }), /不匹配/);
+  const context = chatRunContext("chat:group:123", { type: "discord", groupId: "123", userId: "dc:456", name: "铁砧工艺交流反馈☕", admin: true });
+  assert.equal(context.title, "【群聊】铁砧工艺交流反馈☕（123）");
+  assert.equal(context.route.userId, "dc:456");
 });

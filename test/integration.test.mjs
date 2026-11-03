@@ -12,6 +12,8 @@ import { template } from "../lib/host/config.js";
 import { McpManager } from "../lib/host/mcp.js";
 import { Bot } from "../lib/host/bot.js";
 import { Gateway } from "../lib/host/gateway.js";
+import { Agent } from "../lib/host/agent.js";
+import { hostFixture } from "./fixtures/host.mjs";
 import { apply } from "../lib/host/index.js";
 const waitFor = async (fn, ms = 10000) => {
   const until = Date.now() + ms;
@@ -55,7 +57,7 @@ test("real MCP stdio discovery, allowlist and invocation", async () => {
     await mcp.close();
   }
 });
-test("full upstream bot starts, connects OneBot and executes /help", async () => {
+test("full upstream bot starts, connects OneBot and executes /help and native queries", async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "synapse-bot-"));
   const profile = path.join(home, "profiles", "test"),
     data = path.join(profile, "data", "dsh-synapse");
@@ -64,6 +66,8 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
     ...defaultsFor(template.fields),
     enabled: true,
     ragEnabled: false,
+    learnMemory: false,
+    learnSkills: false,
   };
   c.modules.command.groups = [123];
   Object.assign(c.modules.chat, {
@@ -104,15 +108,33 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
   });
   const errors = [],
     received = [],
-    resets = [],
-    gateway = new Gateway(
+    resets = [];
+  const originalFetch = globalThis.fetch;
+  let queries = 0;
+  t.mock.method(globalThis, "fetch", async (input, init) => {
+    if (new URL(input).hostname === "piston-meta.mojang.com") {
+      queries++;
+      return Response.json({ latest: { release: "example-release", snapshot: "example-snapshot" } });
+    }
+    return originalFetch(input, init);
+  });
+  const host = hostFixture(async ({ message, tools, signal }) => {
+    if (message.content[0].text.includes("first group message")) {
+      const version = await tools.find((tool) => tool.name === "synapse_minecraft_version").execute({}, { signal });
+      return `hello ${version.release}`;
+    }
+    return "hello";
+  });
+  const agent = new Agent({ loader: host.loader, config: () => c, paths: { home, profile, data, skills: path.join(profile, "skills") }, memory: {}, skills: { retrieve: async () => [] }, mcp: { available: async () => [] } });
+  const gateway = new Gateway(
       {
         run: async (...args) => {
           received.push({ input: args[0], key: args[7], context: args[8] });
-          return "hello";
+          return agent.run(...args);
         },
         reset: async (key) => {
           resets.push(key);
+          await agent.reset(key);
         },
       },
       () => c,
@@ -200,6 +222,8 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
     assert.match(received[2].input, /second group message/);
     assert.equal(received[1].context.title, "【群聊】铁砧工艺交流反馈☕（123）");
     assert.equal(received[2].context.route.userId, "2");
+    assert.equal(queries, 1);
+    await waitFor(() => requests.some((r) => r.url === "/send_group_msg" && JSON.stringify(r.body).includes("example-release")));
     assert.deepEqual(resets, ["chat:group:123"]);
     assert.deepEqual(errors, []);
   } catch (e) {
@@ -219,6 +243,7 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
   } finally {
     await bot.stop();
     await gateway.close();
+    await agent.close();
     for (const s of ws.clients) s.terminate();
     await new Promise((r) => ws.close(r));
     await new Promise((r) => http.close(r));

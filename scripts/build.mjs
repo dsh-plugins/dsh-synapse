@@ -98,6 +98,83 @@ await build({
                 );
               contents = contents.replaceAll(from, to);
             };
+            const replaceSection = (from, until, replacement = "") => {
+              const start = contents.indexOf(from);
+              const end = contents.indexOf(until, start + from.length);
+              if (start < 0 || end < 0) {
+                throw new Error(`查询工具适配锚点缺失：${from}`);
+              }
+              contents = contents.slice(0, start) + replacement + contents.slice(end);
+            };
+            replace("import { SkillManager } from '@/features/hermes/skills';\n", "");
+            replace("  private readonly skillManager = new SkillManager();\n", "");
+            replace("import { Github } from '@/features/github';\n", "");
+            replace("import { isGithubEnabledGroup } from '@/config/features';\n", "");
+            replace("  GroupAdminApi,\n", "");
+            replace(
+              "buildConversationHistory, buildGroupContext, appendAutoCardNote",
+              "buildConversationHistory, buildGroupContext",
+            );
+            replace("const RESERVED_LABEL_RE = /\\[SKILL:|MEDIA:/;", "const RESERVED_LABEL_RE = /MEDIA:/;");
+            replaceSection(" * - 技能系统", " * - 触发 AI", " * - 查询与群管理使用 DSH 原生工具，模型在同一回合内组织工具结果；\n");
+            replaceSection("  /** 查询技能结果回喂的最大轮数", "  /** 对话会话");
+            replaceSection("  /**\n   * 统计消息中会被消息管道自动渲染卡片", "  /** 发送者展示名");
+            replaceSection("  /** 技能执行用的群管理 API 门面 */", "  /** 解析群成员名称");
+            replace(
+              "const text = appendAutoCardNote(formatted.text, this.countAutoCardReferences(formatted.text, route));",
+              "const text = formatted.text;",
+            );
+            contents = contents.replace(/^    \/\/ .*自动.*卡片.*(?:加注记|避免技能重复发卡).*\n/gm, "");
+            replaceSection(
+              "  /**\n   * 组装提示词、提交 Hermes 运行",
+              "  private async startHermesRun(",
+              "  /** 表情回应与回执保持到原生工具调用和最终回复全部结束。 */\n",
+            );
+            replace("      msg.message_id,\n      0,\n", "      msg.message_id,\n");
+            replace("label, 0, 0, reactionKey", "label, 0, reactionKey");
+            replace("    feedbackDepth: number = 0,\n", "");
+            replace("    const isFeedback = feedbackDepth > 0;\n", "");
+            replace("isFeedback || route.type === 'user'", "route.type === 'user'");
+            replace("        feedbackDepth,\n", "");
+            replace("    const skillsPrompt = this.skillManager.buildPrompt();\n", "");
+            replace("[baseSystem, groupContext, skillsPrompt]", "[baseSystem, groupContext]");
+            replace("    const sessionVersion = session.sessionVersion || 0;\n", "");
+            replace("    // Hermes sessionId 按人区分；群聊/频道日志仍按群共享", "    // 群聊与桥接频道共用原生会话，私聊按用户区分。");
+            replace("    // 组装系统提示词：configs/SOUL.md > systemPrompt > 空 + 群聊上下文 + 技能列表。", "    // 人设和当前对话者信息随本轮请求发送，工具定义由宿主注册。");
+            replace("    // 构建用户提示词（私聊与回喂轮不带发言人前缀）", "    // 私聊直接使用正文，群聊标注当前发言人。");
+            replaceSection("    // 回喂轮（工具数据）与私聊", "    const historyContent");
+            replace("  /** 处理运行完成：发送最终回复，执行技能标签，处理 MEDIA 标签 */", "  /** 工具回合完成后发送最终回复并处理媒体。 */");
+            replaceSection(
+              "    // 「处理中」表情回应默认随本轮结束摘除",
+              "  /** handleRunComplete 主体",
+              `    try {
+      await this.finishRun(run);
+    } finally {
+      if (run.reactionKey) {
+        await this.removeReaction(run.reactionKey, run.route).catch(error => {
+          this.bot?.logger?.warn('[Synapse] 移除表情回应失败: ' + (error as Error).message);
+        });
+      }
+    }
+  }
+
+`,
+            );
+            replaceSection(
+              "  /** handleRunComplete 主体",
+              "  /** finishRun 主体",
+              `  private async finishRun(run: RunState): Promise<void> {
+    try {
+      await this.finishRunBody(run);
+    } finally {
+      await this.recallReceiptOnce(run);
+    }
+  }
+
+`,
+            );
+            replace("private async finishRunBody(run: RunState, markKeepReaction: () => void)", "private async finishRunBody(run: RunState)");
+            replaceSection("    // 执行技能标签", "    // 记录回复对象");
             replace(
               "`group_${route.groupId}_user_${route.userId}`",
               "`group_${route.groupId}`",

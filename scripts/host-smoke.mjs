@@ -4,11 +4,15 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
 import { template } from "../lib/host/config.js";
 import { Harness } from "../lib/host/harness.js";
+import { learningTools } from "../lib/host/native-tools.js";
+import { Memory } from "../lib/host/memory.js";
+import { SkillStore } from "../lib/host/files.js";
+import { chatTools } from "../lib/host/chat-tools.js";
 if (!process.argv[2])
   throw new Error(
     "Usage: node scripts/host-smoke.mjs <installed DSH package.json>",
@@ -21,6 +25,7 @@ const llm = await load("dsh-llm");
 const ctx = new Context();
 const data = await mkdtemp(path.join(os.tmpdir(), "synapse-native-"));
 const requests = [];
+const nativeCalls = [];
 let callTool = false;
 let blockNext = false,
   blocked;
@@ -52,6 +57,13 @@ class FixtureLlm extends Service {
         name: "mcp_fixture_read",
         argumentsDelta: '{"query":"hello"}',
       };
+      yield { type: "finish", reason: { kind: "tool-calls" } };
+      return;
+    }
+    if (nativeCalls.length) {
+      const { name, args } = nativeCalls.shift();
+      assert(request.tools.some((tool) => tool.name === name));
+      yield { type: "tool-call-delta", index: 0, id: `native-${requests.length}`, name, argumentsDelta: JSON.stringify(args) };
       yield { type: "finish", reason: { kind: "tool-calls" } };
       return;
     }
@@ -145,6 +157,9 @@ const makeHarness = () =>
     },
   );
 let harness = makeHarness();
+const paths = { data, home: data, profile: data, skills: path.join(data, "skills") };
+const memory = new Memory(":memory:", { embed: async () => [1, ...Array(511).fill(0)] }, () => config);
+const skills = new SkillStore(paths);
 const residentRun = (system, input, tools = [], signal) =>
   harness.run(
     system,
@@ -204,6 +219,44 @@ try {
   assert.equal(calls, 1);
   assert.equal(requests.length, 3);
   assert.match(JSON.stringify(requests[1]), /first resident message/);
+  nativeCalls.push(
+    { name: "synapse_memory_save", args: { text: "原生回合主动保存的重要事实" } },
+    { name: "synapse_memory_search", args: { query: "重要事实" } },
+    { name: "synapse_skill_save", args: { name: "auto-chat-example", content: "# 流程\n已验证的步骤" } },
+    { name: "synapse_skill_read", args: { name: "auto-chat-example" } },
+  );
+  await residentRun("主动总结", "保存本次经验", learningTools(() => config, memory, skills, "chat"));
+  assert.equal(memory.list("chat")[0].text, "原生回合主动保存的重要事实");
+  assert.equal(memory.list("review").length, 0);
+  assert.equal((await skills.list())[0].content, "# 流程\n已验证的步骤");
+  const originalFetch = globalThis.fetch;
+  const repositories = config.repositories;
+  try {
+    config.repositories = "foo/bar";
+    let queries = 0;
+    globalThis.fetch = async (input, init) => {
+      init.signal.throwIfAborted();
+      assert(!new Headers(init.headers).has("Authorization"));
+      queries++;
+      const url = new URL(input);
+      if (url.hostname === "ghapi.anvilcraft.dev") {
+        return Response.json({ title: "宿主查询验证 Issue", body: "真实工具返回", html_url: "https://github.com/foo/bar/issues/114", state: "open" });
+      }
+      assert.equal(url.hostname, "api.bilibili.com");
+      return Response.json({ code: 0, data: { bvid: "BV1xx411c7mD", title: "宿主查询验证视频", owner: { name: "foo" } } });
+    };
+    nativeCalls.push(
+      { name: "synapse_github_issue", args: { reference: "foo/bar#114" } },
+      { name: "synapse_bilibili_video", args: { video: "BV1xx411c7mD" } },
+    );
+    await residentRun("使用查询结果回复", "查询项目和视频", chatTools(() => config, paths, { type: "user", userId: "1", name: "example", admin: false }));
+    assert.equal(queries, 2);
+    assert.match(JSON.stringify(requests.at(-1)), /宿主查询验证 Issue/);
+    assert.match(JSON.stringify(requests.at(-1)), /宿主查询验证视频/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    config.repositories = repositories;
+  }
   await harness.close();
   harness = makeHarness();
   config.sessionPermission = "danger-full-access";
@@ -273,9 +326,12 @@ try {
     assert.equal(await permissionOf(requests.at(-1).sessionId), "auto");
   }
   console.log(
-    "Real DSH resident Agent: permissions, follow-ups, tools, JSONL resume, cancellation/error recovery and reset passed.",
+    "真实 DSH 验证通过：会话标题、权限、原生 RAG/Skill 与查询工具、JSONL 恢复、取消与重置。",
   );
 } finally {
   await harness.close();
+  memory.close();
   await ctx.fiber.dispose();
+  assert(path.resolve(data).startsWith(path.resolve(os.tmpdir()) + path.sep));
+  await rm(data, { recursive: true, force: true });
 }
