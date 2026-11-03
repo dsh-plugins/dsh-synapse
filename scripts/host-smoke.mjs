@@ -10,6 +10,7 @@ import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
 import { template } from "../lib/host/config.js";
 import { Harness } from "../lib/host/harness.js";
 import { learningTools } from "../lib/host/native-tools.js";
+import { learningDelegations } from "../lib/host/learning.js";
 import { Memory } from "../lib/host/memory.js";
 import { SkillStore } from "../lib/host/files.js";
 import { chatTools } from "../lib/host/chat-tools.js";
@@ -27,6 +28,7 @@ const llm = await load("dsh-llm");
 const ctx = new Context();
 const data = await mkdtemp(path.join(os.tmpdir(), "synapse-native-"));
 const requests = [];
+const routes = [];
 const nativeCalls = [];
 let callTool = false;
 let blockNext = false,
@@ -36,7 +38,10 @@ class FixtureLlm extends Service {
     super(ctx, "llm");
   }
   async prepareCall(config) {
-    return { config, stream: (request) => this.stream(request) };
+    return { config, stream: (request) => {
+      routes.push({ sessionId: request.sessionId, provider: config.provider, model: config.model, reasoningEffort: config.reasoningEffort });
+      return this.stream(request);
+    } };
   }
   async *stream(request) {
     requests.push(request);
@@ -64,7 +69,7 @@ class FixtureLlm extends Service {
     }
     if (nativeCalls.length) {
       const { name, args } = nativeCalls.shift();
-      assert(request.tools.some((tool) => tool.name === name));
+      assert(request.tools.some((tool) => tool.name === name), `当前回合缺少 ${name}：${JSON.stringify(request.messages.slice(-2))}`);
       yield { type: "tool-call-delta", index: 0, id: `native-${requests.length}`, name, argumentsDelta: JSON.stringify(args) };
       yield { type: "finish", reason: { kind: "tool-calls" } };
       return;
@@ -87,6 +92,9 @@ class FixtureWorkingDirectory extends Service {
   }
   async ensure() {
     return data;
+  }
+  set(_session, cwd) {
+    assert.equal(cwd, data);
   }
 }
 await ctx.plugin(FixtureWorkingDirectory);
@@ -135,6 +143,8 @@ const persistencePlugin = await load("dsh-session-persistence-jsonl");
 await ctx.plugin(persistencePlugin.default ?? persistencePlugin, {
   root: path.join(data, "native-history"),
 });
+await ctx.plugin((await load("dsh-subagent")).default, { maxActiveSubagents: 8, maxDepth: 1 });
+await ctx.plugin(await load("dsh-subagent-spawn-in-process"), { providerName: "spawn" });
 let calls = 0;
 ctx.tools.register({
   name: "global_tool",
@@ -358,8 +368,41 @@ try {
   } finally {
     await occupied.close();
   }
+  const delegated = [];
+  const offDelegated = ctx.on("subagent/start", (info) => {
+    const child = ctx.agents.get(info.id);
+    assert.equal(child.session.header.parentSession, requests.at(-1).sessionId);
+    assert.equal(child.session.header.origin, "subagent");
+    delegated.push(info.id);
+  });
+  try {
+    for (const [kind, args] of [
+      ["memory", { text: "原生子代理保存的重要事项" }],
+      ["skill", { name: "auto-chat-delegated", content: "# 原生子代理流程\n已验证的复用步骤。" }],
+    ]) {
+      nativeCalls.push(
+        { name: `synapse_${kind}_summarize`, args: { evidence: "已经核实的事实与成功步骤" } },
+        { name: `synapse_${kind}_save`, args },
+      );
+      const start = requests.length;
+      await residentRun("主动委派子代理总结", "总结本次任务", learningDelegations({ services: { get: name => ctx.get(name) } }, () => config, memory, skills, "chat"));
+      const childRequests = requests.slice(start).filter(request => delegated.includes(request.sessionId));
+      assert(childRequests.length > 0);
+      assert(childRequests.every(request => request.tools.every(tool => tool.name.startsWith(`synapse_${kind}_`))));
+      const parentRoute = routes[start];
+      assert.equal(parentRoute.provider, "host-provider");
+      assert.equal(parentRoute.model, "host-model");
+      assert(routes.slice(start).filter(route => delegated.includes(route.sessionId)).every(route => route.provider === parentRoute.provider && route.model === parentRoute.model && route.reasoningEffort === parentRoute.reasoningEffort));
+    }
+    assert(memory.list("chat").some(item => item.text === "原生子代理保存的重要事项"));
+    assert((await skills.list()).some(item => item.name === "auto-chat-delegated"));
+    assert.equal(delegated.length, 2);
+    assert(delegated.every(id => !ctx.agents.get(id)));
+  } finally {
+    offDelegated();
+  }
   console.log(
-    "真实 DSH 验证通过：图片附件、会话标题、权限、原生 RAG/Skill 与查询工具、JSONL 恢复、取消与重置。",
+    "真实 DSH 验证通过：图片附件、会话标题、权限、原生 RAG/Skill 子代理与查询工具、JSONL 恢复、取消与重置。",
   );
 } finally {
   await harness.close();

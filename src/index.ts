@@ -42,7 +42,6 @@ export async function createService(
       memory,
       skills,
       mcp,
-      onError,
     }),
     gateway = new Gateway(agent, config, onError);
   const bot = new Bot(paths, config, gateway, onError),

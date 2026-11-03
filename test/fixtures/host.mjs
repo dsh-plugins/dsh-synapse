@@ -1,14 +1,31 @@
 import { randomUUID } from "node:crypto";
 
 // Native lifecycle contract fixture; durable history survives owner disposal.
-export function hostFixture(execute = async () => "done") {
+export function hostFixture(execute = async () => "done", { legacySubagents = false } = {}) {
   const created = [],
     resumed = [],
     disposed = [],
     attachments = [],
     stored = new Map(),
     logs = new Map(),
-    permissionWrites = [];
+    permissionWrites = [],
+    records = new Map(),
+    failures = new Map(),
+    activeChildren = new Map(),
+    globalListeners = new Map();
+  const globalContext = {
+    on(name, listener) {
+      const set = globalListeners.get(name) ?? new Set();
+      globalListeners.set(name, set);
+      set.add(listener);
+      return () => set.delete(listener);
+    },
+  };
+  const broadcast = (name, data) => {
+    for (const listener of globalListeners.get(name) ?? []) {
+      listener(data);
+    }
+  };
   const permissions = {
     names: ["read-only", "workspace-write", "danger-full-access", "auto"],
     set(session, preset) {
@@ -41,23 +58,40 @@ export function hostFixture(execute = async () => "done") {
       get: (name) =>
         ({
           systemPrompt: {
-            section: (s) => sections.push(s),
-            variable: (name, fn) => variables.set(name, fn),
+            section: (s) => {
+              sections.push(s);
+              return () => sections.splice(sections.indexOf(s), 1);
+            },
+            variable: (name, fn) => {
+              variables.set(name, fn);
+              return () => variables.delete(name);
+            },
           },
           tools: {
-            restrict: (filter) => restrictions.push(filter),
+            restrict: (filter) => {
+              restrictions.push(filter);
+              return () => restrictions.splice(restrictions.indexOf(filter), 1);
+            },
             register: (tool) => {
               tools.push(tool);
               return () => tools.splice(tools.indexOf(tool), 1);
             },
           },
         })[name],
-      on: (name, fn) => listeners.set(name, fn),
+      on(name, fn) {
+        listeners.set(name, fn);
+        return () => {
+          if (listeners.get(name) === fn) {
+            listeners.delete(name);
+          }
+        };
+      },
     };
     const agent = {
       id,
       session: {
         id,
+        header: { id, ...options.meta },
         events,
         append: (type, data) => events.push({ type, data }),
       },
@@ -109,13 +143,14 @@ export function hostFixture(execute = async () => "done") {
             });
             conversation.push({ role: "assistant", content: output });
           } catch (error) {
+            failures.set(id, error);
             emit("agent/error", { error });
           }
         })();
       },
       whenIdle: () => task,
     };
-    await options.setup(scope, agent);
+    await options.setup?.(scope, agent);
     const record = {
       options,
       agent,
@@ -124,7 +159,12 @@ export function hostFixture(execute = async () => "done") {
       injected,
       conversation,
       selected,
+      sections,
+      variables,
+      listeners,
     };
+    records.set(id, record);
+    broadcast("agent/created", { agent });
     if (options.resumeSessionId) resumed.push(record);
     else created.push(record);
     return {
@@ -136,7 +176,43 @@ export function hostFixture(execute = async () => "done") {
       },
     };
   }
-  const agents = { create, resume: create };
+  const agents = { create, resume: create, ctx: globalContext };
+  async function startActivation(spec) {
+    spec.signal.throwIfAborted();
+    const parent = spec.request.parent;
+    const handle = await create({
+      sessionId: spec.childId,
+      meta: { origin: "subagent", parentSession: parent.id, delegationDepth: 1 },
+      setup: (_scope, agent) => agent.model.select(records.get(parent.id).selected.at(-1)),
+    });
+    handle.agent.followup({ role: "user", content: spec.request.prompt });
+    const result = handle.agent.whenIdle().then(() => ({
+      output: [{ type: "text", text: records.get(spec.childId).conversation.at(-1)?.content ?? "" }],
+      stopReason: failures.has(spec.childId) ? "error" : "completed",
+    }));
+    const activation = { childId: spec.childId, result, dispose: async () => {
+      await handle.dispose();
+      activeChildren.delete(spec.childId);
+    } };
+    activeChildren.set(spec.childId, activation);
+    return activation;
+  }
+  const subagents = {
+    ctx: globalContext,
+    getProvider: () => ({ prepareContinuable: async () => ({}) }),
+    ...(legacySubagents ? {
+      async startContinuable(spec) {
+        const activation = await startActivation(spec);
+        void activation.result.then((result) => broadcast("subagent/end", { id: spec.childId, stopReason: result.stopReason, lastAssistantMessage: result.output }));
+        return { childId: spec.childId };
+      },
+      async drainContinuableChildren(_parent, ids) {
+        for (const id of ids) {
+          await activeChildren.get(id)?.dispose();
+        }
+      },
+    } : { startActivation }),
+  };
   const loader = {
     llm: {
       createUserMessage: (input) => ({
@@ -149,6 +225,7 @@ export function hostFixture(execute = async () => "done") {
       get: (name) =>
         ({
           agents,
+          subagents,
           permissionPresets: permissions,
           sessionTitle: {
             get: (session) => session.events.filter((e) => e.type === "session/title").at(-1)?.data,
@@ -177,6 +254,7 @@ export function hostFixture(execute = async () => "done") {
     stored,
     permissions,
     permissionWrites,
+    listenerCount: (name) => globalListeners.get(name)?.size ?? 0,
     select: (value) => {
       selection = value;
     },

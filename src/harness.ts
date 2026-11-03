@@ -195,7 +195,7 @@ export class Harness {
               });
               try {
                 return await (tool.execute
-                  ? tool.execute(args, exec.signal)
+                  ? tool.execute(args, exec.signal, handle.agent)
                   : this.mcp.call(tool, args, exec.signal));
               } catch (e) {
                 failed = true;

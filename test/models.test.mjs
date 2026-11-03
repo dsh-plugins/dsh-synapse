@@ -8,7 +8,7 @@ import { template } from "../lib/host/config.js";
 import { Agent } from "../lib/host/agent.js";
 import { hostFixture } from "./fixtures/host.mjs";
 
-test("聊天与审查模型通过 loader 校验并用于各自任务、自总结和后续消息", async (t) => {
+test("聊天与审查模型通过 loader 校验并用于各自任务和后续消息", async (t) => {
   const chat = { provider: "foo", model: "chat", reasoningEffort: "high" };
   const review = { provider: "bar", model: "review", reasoningEffort: "low" };
   const c = validateValues(template.fields, {
@@ -31,9 +31,6 @@ test("聊天与审查模型通过 loader 校验并用于各自任务、自总结
     memory: { search: async () => [], addMany: async () => {} },
     skills: { retrieve: async () => [] },
     mcp: { available: async () => [] },
-    onError: (error) => {
-      throw error;
-    },
   });
   t.after(async () => {
     await agent.close();
@@ -52,22 +49,17 @@ test("聊天与审查模型通过 loader 校验并用于各自任务、自总结
     );
   await run("chat");
   await run("review");
-  assert.deepEqual(selected, [chat, chat, review, review]);
+  assert.deepEqual(selected, [chat, review]);
   c.chatModel = { provider: "foo", model: "changed" };
   await run("chat");
-  assert.deepEqual(selected.slice(-2), [c.chatModel, c.chatModel]);
+  assert.deepEqual(selected.at(-1), c.chatModel);
   c.chatModel = null;
   c.reviewModel = null;
   const fallback = { provider: "example", model: "default" };
   host.select(fallback);
   await run("chat");
   await run("review");
-  assert.deepEqual(selected.slice(-4), [
-    fallback,
-    fallback,
-    fallback,
-    fallback,
-  ]);
+  assert.deepEqual(selected.slice(-2), [fallback, fallback]);
 });
 
 test("显式选择模型后无需配置宿主默认模型", async (t) => {

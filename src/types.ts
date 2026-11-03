@@ -164,7 +164,8 @@ export interface AvailableTool {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  execute?: (args: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>;
+  /** parent 由宿主工具回调绑定，只供原生子代理委派使用，不接受模型覆盖。 */
+  execute?: (args: Record<string, unknown>, signal: AbortSignal, parent?: any) => Promise<unknown>;
 }
 export interface ChatMessage {
   role: string;
