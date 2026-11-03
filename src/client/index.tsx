@@ -6,7 +6,7 @@
 import * as React from "react";
 import type { ConfigDialogProps, DshLoaderUi } from "@dsh-plugin/dsh-loader/client";
 import { moduleFields, mcpServerItem } from "../feature-config.js";
-import { Fields, DIALOG_CSS, fieldDefault } from "./fields.js";
+import { Fields, DIALOG_CSS, fieldDefault, setAt } from "./fields.js";
 import type { SynapseConfig } from "../types.js";
 
 export const inject = ["dshLoaderUi"];
@@ -27,7 +27,7 @@ function ModulesEditor({
         fields={moduleFields}
         draft={value}
         path={[]}
-        onChange={(_, next) => setValue(next as SynapseConfig["modules"])}
+        onChange={(path, next) => setValue(setAt(value, path, next))}
         errors={errors}
         prefix="synapse-modules"
       />
@@ -56,9 +56,9 @@ function McpServersEditor({
               }))}
               draft={server}
               path={[]}
-              onChange={(_, next) =>
+              onChange={(path, next) =>
                 setValue(
-                  list.map((entry, i) => (i === index ? next : entry)) as SynapseConfig["mcpServers"],
+                  list.map((entry, i) => (i === index ? setAt(entry, path, next) : entry)),
                 )
               }
               errors={errors}

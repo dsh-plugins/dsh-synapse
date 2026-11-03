@@ -22,6 +22,7 @@ export const DIALOG_CSS = `
 .synapse-config-array-item{display:flex;flex-direction:column;gap:8px;border:1px solid var(--dsw-alias-border-l2,#8883);border-radius:8px;padding:10px}
 .synapse-config-array-toolbar{display:flex;gap:8px;justify-content:flex-end}
 .synapse-config-group{border:1px solid var(--dsw-alias-border-l2,#8884);border-radius:10px;padding:0 12px;margin:0;min-width:0}
+.synapse-config-group[data-expanded=false]{border:0;padding:0 12px}
 .synapse-config-group legend{padding:0 8px;font-weight:500}
 .synapse-config-group-body{padding:8px 0;display:flex;flex-direction:column;gap:14px}
 .synapse-config-group-toggle{display:inline-flex;align-items:center;gap:6px;border:0;background:none;font:inherit;font-weight:inherit;text-align:start;cursor:pointer;padding:0}
@@ -41,14 +42,13 @@ function at(value: unknown, path: string[]): unknown {
 }
 
 function setAt<T>(value: T, path: string[], next: unknown): T {
+  if (!path.length) {
+    return next as T;
+  }
   const copy = structuredClone(value) as Record<string, unknown>;
   let target: Record<string, unknown> = copy;
   for (const key of path.slice(0, -1)) {
-    const child = target[key];
-    target[key] =
-      child && typeof child === "object" && !Array.isArray(child)
-        ? { ...(child as Record<string, unknown>) }
-        : {};
+    target[key] ??= {};
     target = target[key] as Record<string, unknown>;
   }
   target[path[path.length - 1]!] = next;
@@ -174,28 +174,20 @@ export function Fields({
         let control: React.ReactNode;
         if (field.type === "array") {
           const list = Array.isArray(value) ? value : [];
-          const itemField = { ...(field.item as ConfigField), key: "item" };
           control = (
             <div className="synapse-config-array">
               {list.length === 0 && (
                 <div className="synapse-config-empty">暂无条目</div>
               )}
-              {list.map((item, itemIndex) => (
+              {list.map((_, itemIndex) => (
                 <div className="synapse-config-array-item" key={itemIndex}>
                   <Fields
-                    fields={[itemField]}
-                    draft={{ item }}
-                    path={[]}
-                    onChange={(_, updated) =>
-                      onChange(
-                        next,
-                        list.map((entry, i) =>
-                          i === itemIndex ? updated : entry,
-                        ),
-                      )
-                    }
+                    fields={[{ ...field.item!, key: String(itemIndex) }]}
+                    draft={draft}
+                    path={next}
+                    onChange={onChange}
                     errors={errors}
-                    prefix={`${prefix}-${itemIndex}`}
+                    prefix={prefix}
                   />
                   <div className="synapse-config-array-toolbar">
                     <button
