@@ -5,6 +5,7 @@ import type {
   ErrorSink,
   ChatMessage,
   AgentEvent,
+  RunContext,
 } from "./types.js";
 import { promptFor } from "./files.js";
 import { createHash } from "node:crypto";
@@ -58,6 +59,7 @@ export class Agent {
     channelInstructions = "",
     ask?: AskApproval,
     sessionKey?: string,
+    context: RunContext = {},
   ) {
     if (!sessionKey?.startsWith(`${channel}:`))
       throw new Error("任务必须绑定对应通道的会话");
@@ -81,6 +83,7 @@ export class Agent {
           ask,
           sessionKey,
           channel,
+          context.title,
         );
         await this.learn(
           typeof input === "string" ? input : JSON.stringify(input),

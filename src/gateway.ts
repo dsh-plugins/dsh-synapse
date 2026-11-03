@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { randomUUID, randomBytes } from "node:crypto";
 import { body, json, equalSecret } from "./http.js";
 import type { ApprovalAnswer } from "./harness.js";
-import { chatSessionKey } from "./session-bindings.js";
+import { chatSessionKey, chatRunContext } from "./session-bindings.js";
 interface Run {
   created: number;
   events: any[];
@@ -78,6 +78,7 @@ export class Gateway {
         return json(res, { error: "运行队列已满" }, 429);
       const data = JSON.parse((await body(req)).toString());
       const sessionKey = chatSessionKey(data.session_id);
+      const context = chatRunContext(sessionKey, data.context);
       const id = randomUUID(),
         controller = new AbortController();
       const run: Run = {
@@ -113,6 +114,7 @@ export class Gateway {
             ? (request) => this.askApproval(run, request, emit)
             : undefined,
           sessionKey,
+          context,
         )
         .then(
           (output) => emit("run.completed", { output }),

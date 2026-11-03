@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { atomicWrite, safePath } from "./files.js";
+import type { ChatRoute, RunContext } from "./types.js";
 
 export function chatSessionKey(id: unknown): string {
   // Accept old upstream per-speaker ids too, but bind the whole group together.
@@ -13,6 +14,29 @@ export function chatSessionKey(id: unknown): string {
       status: 400,
     });
   return `chat:${match[1]}:${match[2]}`;
+}
+
+/** 校验桥接端的聊天信息，标题使用当前群名或私聊昵称。 */
+export function chatRunContext(key: string, value: unknown): RunContext {
+  const [, kind, id] = key.split(":");
+  const prefix = kind === "group" ? "群聊" : "私聊";
+  if (value === undefined) {
+    return { title: `【${prefix}】（${id}）` };
+  }
+  const raw = value as Partial<ChatRoute>;
+  if (!raw || typeof raw !== "object" ||
+      !["user", "group", "discord"].includes(raw.type) ||
+      typeof raw.userId !== "string" || !/^(?:dc:)?\d+$/.test(raw.userId) ||
+      (kind === "user" ? raw.type !== "user" || raw.userId !== id
+        : raw.type === "user" || raw.groupId !== id)) {
+    throw Object.assign(new Error("聊天信息与会话标识不匹配"), { status: 400 });
+  }
+  const name = typeof raw.name === "string"
+    ? raw.name.replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, 256) : "";
+  return {
+    title: `【${prefix}】${name}（${id}）`,
+    route: { type: raw.type, userId: raw.userId, groupId: raw.groupId, name, admin: raw.admin === true },
+  };
 }
 
 /** Only the binding lives here; the native DSH persistence service owns session history. */

@@ -62,6 +62,7 @@ export class Harness {
     ask?: AskApproval,
     sessionKey?: string,
     channel: Channel = "chat",
+    title?: string,
   ) {
     const task = this.execute(
       system,
@@ -73,6 +74,7 @@ export class Harness {
       ask,
       sessionKey,
       channel,
+      title,
     );
     this.tasks.add(task);
     void task.finally(() => this.tasks.delete(task)).catch(() => {});
@@ -125,6 +127,7 @@ export class Harness {
     ask?: AskApproval,
     sessionKey?: string,
     channel: Channel = "chat",
+    title?: string,
   ): Promise<string> {
     const signal = AbortSignal.any([
       this.shutdown.signal,
@@ -161,6 +164,15 @@ export class Harness {
     signal.addEventListener("abort", abort, { once: true });
     try {
       signal.throwIfAborted();
+      if (title) {
+        const titles = this.loader.services.get("sessionTitle");
+        if (!titles?.get || !titles?.rename) {
+          throw new Error("DSH 会话标题服务不可用");
+        }
+        if (titles.get(handle.agent.session)?.title !== title) {
+          titles.rename(handle.agent.session, title);
+        }
+      }
       handle.agent.model?.select(selection);
       const tools = scope.get("tools");
       for (const tool of available)

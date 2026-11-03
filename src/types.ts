@@ -1,6 +1,19 @@
 import type { HostAPI, CordisContext } from "@dsh-plugin/dsh-loader";
 import type { ConfigModelValue } from "@dsh-plugin/dsh-loader/config";
 export type Channel = "chat" | "review";
+/** 聊天网关提供的发送者信息，工具执行时用于限定群号和管理权限。 */
+export interface ChatRoute {
+  type: "user" | "group" | "discord";
+  userId: string;
+  groupId?: string;
+  name: string;
+  admin: boolean;
+}
+/** 通道提供的会话展示信息与聊天权限，不接受模型工具参数覆盖。 */
+export interface RunContext {
+  title?: string;
+  route?: ChatRoute;
+}
 export interface PluginPaths {
   profile: string;
   home: string;

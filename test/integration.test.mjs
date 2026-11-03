@@ -86,7 +86,9 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
         data:
           req.url === "/get_login_info"
             ? { user_id: 42, nickname: "testbot" }
-            : { message_id: 77 },
+            : req.url === "/get_group_info"
+              ? { group_name: "铁砧工艺交流反馈☕" }
+              : { message_id: 77 },
       }),
     );
   });
@@ -106,7 +108,7 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
     gateway = new Gateway(
       {
         run: async (...args) => {
-          received.push({ input: args[0], key: args[7] });
+          received.push({ input: args[0], key: args[7], context: args[8] });
           return "hello";
         },
         reset: async (key) => {
@@ -170,6 +172,7 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
       12000,
     );
     assert.equal(received[0].key, "chat:user:1");
+    assert.equal(received[0].context.title, "【私聊】tester（1）");
     for (const [user, text] of [
       [1, "first group message"],
       [2, "second group message"],
@@ -195,6 +198,8 @@ test("full upstream bot starts, connects OneBot and executes /help", async () =>
     );
     assert.match(received[1].input, /first group message/);
     assert.match(received[2].input, /second group message/);
+    assert.equal(received[1].context.title, "【群聊】铁砧工艺交流反馈☕（123）");
+    assert.equal(received[2].context.route.userId, "2");
     assert.deepEqual(resets, ["chat:group:123"]);
     assert.deepEqual(errors, []);
   } catch (e) {

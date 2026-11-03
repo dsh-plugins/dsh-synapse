@@ -264,6 +264,7 @@ export class Reviews {
       "",
       undefined,
       `review:github:${repo.toLowerCase()}`,
+      { title: `【${isPR ? "PR" : "Issue"} 审查】${repo}#${number}` },
     );
     if (c.publishReviews) {
       if (isPR) {

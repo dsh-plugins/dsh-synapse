@@ -79,6 +79,7 @@ await ctx.plugin(FixtureWorkingDirectory);
 for (const name of [
   "dsh-session-projection",
   "dsh-session",
+  "dsh-session-title",
   "dsh-agent",
   "dsh-system-prompt",
   "dsh-tools",
@@ -97,7 +98,8 @@ for (const name of [
   const plugin = await load(name);
   await ctx.plugin(
     plugin.default ?? plugin,
-    name === "dsh-agent-loop" ? { agents: [], maxParallelToolCalls: 1 } : {},
+    name === "dsh-agent-loop" ? { agents: [], maxParallelToolCalls: 1 }
+      : name === "dsh-session-title" ? { fallbackMaxWords: 12, fallbackMaxBytes: 128, maxTitleBytes: 1024 } : {},
   );
 }
 const permissionPlugin = await load("dsh-permission-presets");
@@ -153,6 +155,8 @@ const residentRun = (system, input, tools = [], signal) =>
     undefined,
     undefined,
     "chat:group:123",
+    "chat",
+    "【群聊】铁砧工艺交流反馈☕（123）",
   );
 const permissionOf = async (id) => {
   await ctx.sessionPersistence.flush();
@@ -178,6 +182,7 @@ try {
     "native DSH response",
   );
   assert.equal(requests.length, 1);
+  assert.equal(ctx.sessionTitle.get(ctx.agents.get(requests[0].sessionId)?.session)?.title, "【群聊】铁砧工艺交流反馈☕（123）");
   assert.equal(requests[0].provider, "host-provider");
   assert.equal(requests[0].model, "host-model");
   assert.equal(await permissionOf(requests[0].sessionId), "read-only");

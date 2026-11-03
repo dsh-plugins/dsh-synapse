@@ -103,6 +103,27 @@ await build({
               "`group_${route.groupId}`",
             );
             replace(
+              "private getSessionKey(route: RouteInfo): string {",
+              `private async synapseContext(route: RouteInfo, label: string): Promise<Record<string, unknown>> {
+    let name = label.endsWith(' (' + route.userId + ')') ? label.slice(0, -route.userId.length - 3) : label;
+    if (route.type !== 'user') {
+      name = '';
+      try {
+        const info = await this.callApi<{ group_name?: string }>('get_group_info', { group_id: Number(route.groupId) });
+        name = info.group_name || '';
+      } catch (error) {
+        this.bot?.logger?.warn('[Synapse] 获取群名失败（' + route.groupId + '）: ' + (error as Error).message);
+      }
+    }
+    return { type: route.type, userId: route.userId, groupId: route.groupId, name, admin: this.isRouteAdmin(route) };
+  }
+  private getSessionKey(route: RouteInfo): string {`,
+            );
+            replace(
+              "sessionId: hermesSessionId,",
+              "sessionId: hermesSessionId,\n        context: await this.synapseContext(route, senderLabel),",
+            );
+            replace(
               "const hermesSessionId = sessionVersion > 0 ? `${hermesSessionBase}:v${sessionVersion}` : hermesSessionBase;",
               "const hermesSessionId = hermesSessionBase;",
             );
@@ -149,6 +170,10 @@ await build({
             );
           }
           if (file.endsWith(path.join("hermes", "client.ts"))) {
+            contents = contents
+              .replace("interface SubmitRunParams {", "interface SubmitRunParams {\n  context?: Record<string, unknown>;")
+              .replace("systemPrompt, conversationHistory }: SubmitRunParams", "systemPrompt, conversationHistory, context }: SubmitRunParams")
+              .replace("if (sessionId) body.session_id = sessionId;", "if (sessionId) body.session_id = sessionId;\n    if (context) body.context = context;");
             const anchor = "export class HermesClient {";
             if (!contents.includes(anchor))
               throw new Error("Upstream Hermes client anchor missing");

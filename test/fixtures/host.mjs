@@ -149,6 +149,10 @@ export function hostFixture(execute = async () => "done") {
         ({
           agents: { create, resume: create },
           permissionPresets: permissions,
+          sessionTitle: {
+            get: (session) => session.events.filter((e) => e.type === "session/title").at(-1)?.data,
+            rename: (session, title) => session.append("session/title", { title }),
+          },
           sessionPersistence: {
             stat: async (id) =>
               stored.has(id) ? { header: { id } } : undefined,
