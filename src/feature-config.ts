@@ -19,16 +19,33 @@ export const num = (
   min = 0,
   max = Number.MAX_SAFE_INTEGER,
 ): ConfigField => ({ type: "number", key, label, default: value, min, max });
+
+export interface CollapseOptions {
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
+}
 export const object = (
   key: string,
   label: string,
   fields: ConfigField[],
-): ConfigField => ({ type: "object", key, label, fields });
+  options?: CollapseOptions,
+): ConfigField => ({ type: "object", key, label, fields, ...options });
 export const array = (
   key: string,
   label: string,
   item: ConfigField,
 ): ConfigField => ({ type: "array", key, label, item });
+export const group = (
+  label: string,
+  fields: ConfigField[],
+  options?: CollapseOptions,
+): ConfigField => ({ type: "group", label, fields, ...options });
+/** 配置表单布局分组默认全部折叠，保持卡片首屏紧凑。 */
+export const collapsibleGroup = (
+  label: string,
+  fields: ConfigField[],
+): ConfigField =>
+  group(label, fields, { collapsible: true, defaultCollapsed: true });
 export const strings = (key: string, label: string): ConfigField =>
   array(key, label, text("item", "值"));
 export const ids = (key = "groups", label = "启用的 QQ 群"): ConfigField =>
@@ -47,27 +64,28 @@ export const select = (
 });
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const COLLAPSED: CollapseOptions = { collapsible: true, defaultCollapsed: true };
 export const moduleFields: ConfigField[] = [
   object("management", "群管理与管理员", [
     ids(),
     ids("operators", "QQ 管理员"),
     strings("discordOperators", "Discord 管理员 ID"),
-  ]),
+  ], COLLAPSED),
   ...[
     ["parentheses", "括号匹配"],
     ["poke", "戳一戳"],
     ["minecraft", "Minecraft 查询"],
     ["modrinth", "Modrinth 查询"],
     ["command", "命令入口"],
-  ].map(([id, label]) => object(id, label, [ids()])),
-  object("bili", "B 站视频与订阅", [ids(), ids("follow", "关注的 B 站 UID")]),
+  ].map(([id, label]) => object(id, label, [ids()], COLLAPSED)),
+  object("bili", "B 站视频与订阅", [ids(), ids("follow", "关注的 B 站 UID")], COLLAPSED),
   object("github", "GitHub 仓库通知", [
     array(
       "subscriptions",
       "仓库订阅",
       object("item", "订阅", [text("repository", "owner/repo"), ids()]),
     ),
-  ]),
+  ], COLLAPSED),
   object("welcome", "新人欢迎", [
     array(
       "welcomes",
@@ -82,7 +100,7 @@ export const moduleFields: ConfigField[] = [
         ),
       ]),
     ),
-  ]),
+  ], COLLAPSED),
   object("discord", "Discord 跨平台桥接", [
     text("token", "Discord Bot Token", "", "password"),
     array(
@@ -96,7 +114,7 @@ export const moduleFields: ConfigField[] = [
         flag("needCmd", "双向仅转发 /send 与桥消息回复"),
       ]),
     ),
-  ]),
+  ], COLLAPSED),
   object("chat", "QQ / Discord 消息行为", [
     text("botName", "机器人展示名称", "小喵"),
     ids(),
@@ -123,7 +141,7 @@ export const moduleFields: ConfigField[] = [
     text("reactionEmojiDiscord", "Discord 回应表情", "👀"),
     flag("privateReactionFallbackText", "私聊表情失败时发送文字回执", true),
     text("privateReceiptText", "私聊文字回执", "🤔 收到，正在思考…"),
-  ]),
+  ], COLLAPSED),
   object("peakValley", "峰谷时段提醒", [
     ids(),
     select("mode", "默认时段类型", [
@@ -204,8 +222,41 @@ export const moduleFields: ConfigField[] = [
       "当前时间是${time}，梁文谷时间！",
       "textarea",
     ),
-  ]),
+  ], COLLAPSED),
 ];
+
+const pairs = (key: string, label: string) =>
+  array(
+    key,
+    label,
+    object("item", "条目", [
+      text("name", "名称"),
+      text("value", "值", "", "password"),
+    ]),
+  );
+
+/** MCP 服务数组的条目模板；同时用于宿主表单与配置弹窗，避免两处定义漂移。 */
+export const mcpServerItem = object("item", "服务", [
+  {
+    type: "text",
+    key: "name",
+    label: "名称",
+    required: true,
+    pattern: "^[a-zA-Z0-9_-]{1,32}$",
+  },
+  flag("enabled", "启用", true),
+  select("transport", "传输", [
+    ["stdio", "stdio"],
+    ["http", "Streamable HTTP"],
+    ["sse", "SSE"],
+  ]),
+  text("command", "启动命令"),
+  strings("args", "命令参数（每项一个参数）"),
+  pairs("env", "环境变量"),
+  text("url", "服务 URL"),
+  pairs("headers", "HTTP 请求头"),
+  strings("allowedTools", "允许自动调用的工具名称"),
+]);
 
 /** Only this boundary translates the visual form to the upstream file formats. */
 export function featureFiles(c: SynapseConfig): { id: string; value: any }[] {

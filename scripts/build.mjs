@@ -3,23 +3,35 @@ import { readFile, mkdir, writeFile, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
+const require = createRequire(import.meta.url);
+const tsdownCli = path.join(
+  path.dirname(require.resolve("tsdown/package.json")),
+  "dist",
+  "run.mjs",
+);
 await mkdir("lib", { recursive: true });
 // Remove artifacts from the former standalone configuration UI on incremental builds.
 for (const file of [
-  "lib/client.js",
-  "lib/host/client.js",
-  "lib/host/client.js.map",
-  "lib/host/client.d.ts",
   "lib/host/panel.html",
   "lib/host/panel.js",
   "lib/host/panel.js.map",
   "lib/host/panel.d.ts",
 ])
   await rm(file, { force: true });
-const require = createRequire(import.meta.url);
 execFileSync(process.execPath, [require.resolve("typescript/bin/tsc")], {
   stdio: "inherit",
 });
+// Client bundle: tsdown wraps the ESM source in the __ModuleLoader__ shell.
+execFileSync(
+  process.execPath,
+  [require.resolve("typescript/bin/tsc"), "-p", "tsconfig.client.json"],
+  { stdio: "inherit" },
+);
+execFileSync(
+  process.execPath,
+  [tsdownCli, "--config", "tsdown.client.config.mjs"],
+  { stdio: "inherit" },
+);
 const vendor = path.resolve("vendor/gugle-chat-bot");
 // Patches are applied at build time, keeping the pinned source auditable.
 await build({

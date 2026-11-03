@@ -8,9 +8,10 @@ import {
   num,
   object,
   array,
-  strings,
   select,
+  collapsibleGroup,
   moduleFields,
+  mcpServerItem,
 } from "./feature-config.js";
 const pairs = (key: string, label: string) =>
   array(
@@ -31,99 +32,65 @@ export const template = defineConfig({
     flag("enabled", "启用机器人"),
     text("profileDir", "当前 profile 绝对路径（自动定位失败时填写）"),
     text("homeDir", "DSH Home 绝对路径（默认 profile 上两级）"),
-    {
-      type: "group",
-      label: "OneBot · NapCat / Snowluma",
-      fields: [
-        text("httpUrl", "HTTP 地址", "http://127.0.0.1:3000"),
-        text("wsUrl", "WebSocket 地址", "ws://127.0.0.1:3001"),
-        text("httpToken", "HTTP Token", "", "password"),
-        text("wsToken", "WS Token", "", "password"),
-        text("tokenParams", "WebSocket Token 查询参数前缀", "?access_token="),
-        text("chromePath", "Chrome / Chromium 路径"),
-        text("userAgent", "HTTP User-Agent", "Mozilla/5.0"),
-        select("logLevel", "日志级别", [
-          ["info", "信息"],
-          ["warn", "警告"],
-          ["error", "错误"],
-          ["debug", "调试"],
-        ]),
-      ],
-    },
-    {
-      type: "group",
-      label: "任务运行限制",
-      fields: [
-        {
-          ...select("sessionPermission", "全部 Synapse 新会话的权限", [
-            ["read-only", "仅查看"],
-            ["workspace-write", "工作区修改"],
-            ["danger-full-access", "完全权限"],
-            ["auto", "自动审查"],
-          ]),
-          description:
-            "仅在新建会话时应用，已有会话保留原权限。自动审查需要宿主启用 @deepseek-ai/dsh-experimental-auto-review。",
-        },
-        num("timeoutSec", "单次任务超时（秒）", 120, 5, 600),
-        num("maxToolRounds", "单次任务最大步骤数", 6, 1, 20),
-      ],
-    },
-    {
-      type: "group",
-      label: "GitHub Webhook",
-      fields: [
-        flag("githubEnabled", "启用 Webhook 审查"),
-        text("githubToken", "GitHub Token", "", "password"),
-        text("webhookSecret", "Webhook Secret", "", "password"),
-        text(
-          "repositories",
-          "允许的 owner/repo（每行一个，支持 owner/*）",
-          "",
-          "textarea",
-        ),
-        flag("publishReviews", "自动发布审查评论"),
-        num("maxDiffChars", "最大差异字符数", 80000, 1000, 500000),
-      ],
-    },
-    {
-      type: "group",
-      label: "RAG / Skill 自总结",
-      fields: [
-        flag("ragEnabled", "启用本地混合记忆", true),
-        num("recallK", "初步召回数量", 50, 1, 200),
-        num("memoryK", "上下文记忆条数", 8, 1, 50),
-        flag("reranker", "启用本地 bge-reranker-base"),
-        flag("learnMemory", "总结重要事项到长期记忆", true),
-        flag("learnSkills", "自动总结 Skill", true),
-        num("maxMemories", "最大记忆条数", 20000, 100, 1000000),
-      ],
-    },
-    object("modules", "聊天与通知功能", moduleFields),
-    array(
-      "mcpServers",
-      "MCP 服务",
-      object("item", "服务", [
-        {
-          type: "text",
-          key: "name",
-          label: "名称",
-          required: true,
-          pattern: "^[a-zA-Z0-9_-]{1,32}$",
-        },
-        flag("enabled", "启用", true),
-        select("transport", "传输", [
-          ["stdio", "stdio"],
-          ["http", "Streamable HTTP"],
-          ["sse", "SSE"],
-        ]),
-        text("command", "启动命令"),
-        strings("args", "命令参数（每项一个参数）"),
-        pairs("env", "环境变量"),
-        text("url", "服务 URL"),
-        pairs("headers", "HTTP 请求头"),
-        strings("allowedTools", "允许自动调用的工具名称"),
+    collapsibleGroup("OneBot · NapCat / Snowluma", [
+      text("httpUrl", "HTTP 地址", "http://127.0.0.1:3000"),
+      text("wsUrl", "WebSocket 地址", "ws://127.0.0.1:3001"),
+      text("httpToken", "HTTP Token", "", "password"),
+      text("wsToken", "WS Token", "", "password"),
+      text("tokenParams", "WebSocket Token 查询参数前缀", "?access_token="),
+      text("chromePath", "Chrome / Chromium 路径"),
+      text("userAgent", "HTTP User-Agent", "Mozilla/5.0"),
+      select("logLevel", "日志级别", [
+        ["info", "信息"],
+        ["warn", "警告"],
+        ["error", "错误"],
+        ["debug", "调试"],
       ]),
-    ),
+    ]),
+    collapsibleGroup("任务运行限制", [
+      {
+        ...select("sessionPermission", "全部 Synapse 新会话的权限", [
+          ["read-only", "仅查看"],
+          ["workspace-write", "工作区修改"],
+          ["danger-full-access", "完全权限"],
+          ["auto", "自动审查"],
+        ]),
+        description:
+          "仅在新建会话时应用，已有会话保留原权限。自动审查需要宿主启用 @deepseek-ai/dsh-experimental-auto-review。",
+      },
+      num("timeoutSec", "单次任务超时（秒）", 120, 5, 600),
+      num("maxToolRounds", "单次任务最大步骤数", 6, 1, 20),
+    ]),
+    collapsibleGroup("GitHub Webhook", [
+      flag("githubEnabled", "启用 Webhook 审查"),
+      text("githubToken", "GitHub Token", "", "password"),
+      text("webhookSecret", "Webhook Secret", "", "password"),
+      text(
+        "repositories",
+        "允许的 owner/repo（每行一个，支持 owner/*）",
+        "",
+        "textarea",
+      ),
+      flag("publishReviews", "自动发布审查评论"),
+      num("maxDiffChars", "最大差异字符数", 80000, 1000, 500000),
+    ]),
+    collapsibleGroup("RAG / Skill 自总结", [
+      flag("ragEnabled", "启用本地混合记忆", true),
+      num("recallK", "初步召回数量", 50, 1, 200),
+      num("memoryK", "上下文记忆条数", 8, 1, 50),
+      flag("reranker", "启用本地 bge-reranker-base"),
+      flag("learnMemory", "总结重要事项到长期记忆", true),
+      flag("learnSkills", "自动总结 Skill", true),
+      num("maxMemories", "最大记忆条数", 20000, 100, 1000000),
+    ]),
+    {
+      ...object("modules", "聊天与通知功能", moduleFields),
+      dialog: { id: "modules-editor", label: "编辑聊天与通知功能" },
+    },
+    {
+      ...array("mcpServers", "MCP 服务", mcpServerItem),
+      dialog: { id: "mcp-servers-editor", label: "编辑 MCP 服务" },
+    },
   ] satisfies ConfigField[],
   panels,
 });
