@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
 import { template } from "../lib/host/config.js";
@@ -13,6 +13,7 @@ import { learningTools } from "../lib/host/native-tools.js";
 import { Memory } from "../lib/host/memory.js";
 import { SkillStore } from "../lib/host/files.js";
 import { chatTools } from "../lib/host/chat-tools.js";
+import { Inference } from "../lib/host/runtime.js";
 if (!process.argv[2])
   throw new Error(
     "Usage: node scripts/host-smoke.mjs <installed DSH package.json>",
@@ -115,6 +116,7 @@ for (const name of [
   );
 }
 const permissionPlugin = await load("dsh-permission-presets");
+await ctx.plugin((await load("dsh-attachment-local")).default, { dshHome: data });
 await ctx.plugin(permissionPlugin.default ?? permissionPlugin, {
   presets: {
     "read-only": { sandbox: "read-only", approval: "ask" },
@@ -160,6 +162,7 @@ let harness = makeHarness();
 const paths = { data, home: data, profile: data, skills: path.join(data, "skills") };
 const memory = new Memory(":memory:", { embed: async () => [1, ...Array(511).fill(0)] }, () => config);
 const skills = new SkillStore(paths);
+const inference = new Inference(path.join(data, "inference"));
 const residentRun = (system, input, tools = [], signal) =>
   harness.run(
     system,
@@ -257,6 +260,23 @@ try {
     globalThis.fetch = originalFetch;
     config.repositories = repositories;
   }
+  if (process.argv[3]) {
+    // 指定旧版 sharp 入口，可在不下载模型权重时验证真实 DLL 的进程隔离。
+    const runtime = path.join(data, "inference", "runtime", "node_modules", "@huggingface", "transformers");
+    await mkdir(runtime, { recursive: true });
+    await writeFile(path.join(runtime, "package.json"), JSON.stringify({ name: "@huggingface/transformers", version: "3.8.1", type: "module", exports: "./index.mjs" }));
+    await writeFile(path.join(runtime, "index.mjs"), `import ${JSON.stringify(pathToFileURL(path.resolve(process.argv[3])).href)};\nexport * from ${JSON.stringify(new URL("../test/fixtures/inference-runtime.mjs", import.meta.url).href)};\n`);
+    const [pid] = await inference.embed("example");
+    assert.notEqual(pid, process.pid);
+  }
+  await residentRun("识别聊天图片", [
+    { type: "text", text: "看看图片" },
+    { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" } },
+  ]);
+  const image = requests.at(-1).messages.flatMap((message) => message.content).find((part) => part.type === "image");
+  assert.equal(image.attachment.width, 1);
+  assert.equal(image.attachment.height, 1);
+  assert((await ctx.attachments.readImage(image.attachment)).data.length > 0);
   await harness.close();
   harness = makeHarness();
   config.sessionPermission = "danger-full-access";
@@ -326,10 +346,11 @@ try {
     assert.equal(await permissionOf(requests.at(-1).sessionId), "auto");
   }
   console.log(
-    "真实 DSH 验证通过：会话标题、权限、原生 RAG/Skill 与查询工具、JSONL 恢复、取消与重置。",
+    "真实 DSH 验证通过：图片附件、会话标题、权限、原生 RAG/Skill 与查询工具、JSONL 恢复、取消与重置。",
   );
 } finally {
   await harness.close();
+  await inference.close();
   memory.close();
   await ctx.fiber.dispose();
   assert(path.resolve(data).startsWith(path.resolve(os.tmpdir()) + path.sep));

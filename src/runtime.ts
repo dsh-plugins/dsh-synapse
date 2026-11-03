@@ -1,7 +1,6 @@
-import { Worker } from "node:worker_threads";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { spawn } from "node:child_process";
+import { fork, spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 const VERSION = "3.8.1";
 export async function installRuntime(root: string, signal?: AbortSignal) {
@@ -91,7 +90,9 @@ export class Inference {
   counter: number;
   closed: boolean;
   starting: Promise<void>;
-  worker: Worker;
+  worker: ChildProcess;
+  private stopped: Promise<void>;
+  private closing: Promise<void>;
   installer = new AbortController();
 
   constructor(data: string) {
@@ -101,44 +102,77 @@ export class Inference {
     this.closed = false;
   }
   async start() {
-    if (this.closed) throw new Error("推理 Worker 已关闭");
-    if (!this.starting)
+    if (this.closed) {
+      throw new Error("推理进程已关闭");
+    }
+    if (!this.starting) {
       this.starting = (async () => {
         const manifest = await installRuntime(
           path.join(this.data, "runtime"),
           this.installer.signal,
         );
-        if (this.closed) throw new Error("推理 Worker 已关闭");
-        this.worker = new Worker(
+        if (this.closed) {
+          throw new Error("推理进程已关闭");
+        }
+        // Windows 工作线程仍共享 DLL，独立进程才能隔离 Transformers 与宿主的 sharp。
+        this.worker = fork(
           new URL("./inference-worker.js", import.meta.url),
-          { workerData: { manifest, cache: path.join(this.data, "models") } },
+          [manifest, path.join(this.data, "models")],
+          {
+            windowsHide: true,
+            stdio: ["ignore", "ignore", "pipe", "ipc"],
+            execArgv: [],
+          },
         );
-        this.worker.on("message", ({ id, value, error }) => {
-          const p = this.pending.get(id);
-          if (!p) return;
-          clearTimeout(p.timer);
-          this.pending.delete(id);
-          error ? p.reject(new Error(error)) : p.resolve(value);
+        let diagnostic = "";
+        this.worker.stderr.on("data", (chunk) => {
+          diagnostic = (diagnostic + chunk.toString()).slice(-6000);
         });
-        const fail = (e) => {
-          for (const p of this.pending.values()) {
+        this.worker.on(
+          "message",
+          ({ id, value, error }: { id: number; value?: number[]; error?: string }) => {
+            const p = this.pending.get(id);
+            if (!p) {
+              return;
+            }
             clearTimeout(p.timer);
-            p.reject(e);
-          }
-          this.pending.clear();
-        };
-        this.worker.on("error", fail);
-        this.worker.on("exit", (code) => {
+            this.pending.delete(id);
+            error ? p.reject(new Error(error)) : p.resolve(value);
+          },
+        );
+        this.worker.on("error", (error) => {
           this.closed = true;
-          fail(new Error(`推理 Worker 退出 (${code})`));
+          this.fail(error);
+          this.worker.kill();
+        });
+        this.stopped = new Promise((resolve) => {
+          this.worker.once("close", (code, signal) => {
+            this.closed = true;
+            this.fail(new Error(
+              `推理进程退出 (${code ?? signal})${diagnostic.trim() ? ": " + diagnostic.trim() : ""}`,
+            ));
+            resolve();
+          });
         });
       })();
+    }
     return this.starting;
+  }
+  private fail(error: Error) {
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(error);
+    }
+    this.pending.clear();
   }
   async call(method, args) {
     await this.start();
-    if (this.closed) throw new Error("推理 Worker 已关闭");
-    if (this.pending.size >= 100) throw new Error("推理队列已满");
+    if (this.closed || !this.worker.connected) {
+      throw new Error("推理进程已关闭");
+    }
+    if (this.pending.size >= 100) {
+      throw new Error("推理队列已满");
+    }
     return new Promise<number[]>((resolve, reject) => {
       const id = ++this.counter;
       const timer = setTimeout(() => {
@@ -146,7 +180,12 @@ export class Inference {
         reject(new Error("模型下载或推理超时"));
       }, 600000);
       this.pending.set(id, { resolve, reject, timer });
-      this.worker.postMessage({ id, method, args });
+      this.worker.send({ id, method, args }, (error) => {
+        if (error && this.pending.delete(id)) {
+          clearTimeout(timer);
+          reject(new Error(`推理请求发送失败：${error.message}`, { cause: error }));
+        }
+      });
     });
   }
   embed(text, query = false) {
@@ -155,10 +194,20 @@ export class Inference {
   rerank(query, documents) {
     return this.call("rerank", { query, documents });
   }
-  async close() {
-    this.closed = true;
-    this.installer.abort();
-    await this.starting?.catch(() => {});
-    await this.worker?.terminate();
+  close() {
+    if (!this.closing) {
+      this.closed = true;
+      this.installer.abort();
+      this.fail(new Error("推理进程已关闭"));
+      this.closing = (async () => {
+        // 启动错误由原请求返回，关闭时等待安装任务结束再回收子进程。
+        await Promise.allSettled(this.starting ? [this.starting] : []);
+        if (this.worker) {
+          this.worker.kill();
+          await this.stopped;
+        }
+      })();
+    }
+    return this.closing;
   }
 }

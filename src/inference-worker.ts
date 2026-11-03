@@ -1,14 +1,7 @@
-import { parentPort, workerData } from "node:worker_threads";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-const require = createRequire(workerData.manifest);
-const runtime = await import(
-  pathToFileURL(require.resolve("@huggingface/transformers")).href
-);
-const { pipeline, env, AutoTokenizer, AutoModelForSequenceClassification } =
-  runtime.default ?? runtime;
-env.cacheDir = workerData.cache;
-env.allowLocalModels = false;
+const require = createRequire(process.argv[2]);
+let runtime, pipeline, env, AutoTokenizer, AutoModelForSequenceClassification;
 let embedder, tokenizer, ranker;
 async function load(factory) {
   try {
@@ -26,11 +19,21 @@ async function load(factory) {
   }
 }
 let queue = Promise.resolve();
-parentPort.on("message", (message) => {
+// 在模型加载前建立进程间通信（IPC），首次请求负责初始化，避免启动时丢失请求。
+process.on("disconnect", () => process.exit(0));
+process.on("message", (message: { id: number; method: string; args: any }) => {
   queue = queue
     .then(async () => {
       const { id, method, args } = message;
       try {
+        runtime ??= import(
+          pathToFileURL(require.resolve("@huggingface/transformers")).href
+        );
+        const api = await runtime;
+        ({ pipeline, env, AutoTokenizer, AutoModelForSequenceClassification } =
+          api.default ?? api);
+        env.cacheDir = process.argv[3];
+        env.allowLocalModels = false;
         let value;
         if (method === "embed") {
           embedder ??= await load(() =>
@@ -79,11 +82,20 @@ parentPort.on("message", (message) => {
               ),
             );
           }
-        } else throw new Error("未知推理方法");
-        parentPort.postMessage({ id, value });
+        } else {
+          throw new Error("未知推理方法");
+        }
+        if (process.connected) {
+          process.send({ id, value });
+        }
       } catch (e) {
-        parentPort.postMessage({ id, error: e.message });
+        if (process.connected) {
+          process.send({ id, error: e.message });
+        }
       }
     })
-    .catch((e) => parentPort.postMessage({ id: message.id, error: e.message }));
+    .catch((e) => {
+      console.error(`推理 IPC 返回失败（${message.id}）：${e.message}`);
+      process.exit(1);
+    });
 });
