@@ -13,7 +13,7 @@ test("可读标题写入原生会话，恢复后更新标题并保留会话记�
   const data = await mkdtemp(path.join(os.tmpdir(), "synapse-titles-"));
   const host = hostFixture();
   const config = defaultsFor(template.fields);
-  const create = () => new Harness(host.loader, () => config, { data }, {});
+  const create = () => new Harness(host.loader, () => config, { data, profile: data }, {});
   let harness = create();
   t.after(async () => { await harness.close(); await rm(data, { recursive: true, force: true }); });
   const run = (title) => harness.run("example", "hello", [], [], undefined, undefined, undefined, "chat:group:659356928", "chat", title);

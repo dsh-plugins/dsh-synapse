@@ -12,7 +12,7 @@ async function fixture(t) {
   const data = await mkdtemp(path.join(os.tmpdir(), "synapse-recovery-"));
   const host = hostFixture();
   const config = defaultsFor(template.fields);
-  const create = () => new Harness(host.loader, () => config, { data }, {});
+  const create = () => new Harness(host.loader, () => config, { data, profile: data }, {});
   let harness = create();
   const run = (signal, onEvent) => harness.run("example", "hello", [{ role: "user", content: "旧通道上下文" }], [], signal, onEvent, undefined, "chat:group:123");
   t.after(async () => { await harness.close(); await rm(data, { recursive: true, force: true }); });

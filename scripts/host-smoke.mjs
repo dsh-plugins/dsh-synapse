@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, stat as fsStat } from "node:fs/promises";
 import os from "node:os";
 import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
 import { template } from "../lib/host/config.js";
@@ -86,29 +86,59 @@ class FixtureShell extends Service {
   sandboxMode = "workspace-write";
 }
 await ctx.plugin(FixtureShell);
+class FixtureFs extends Service {
+  constructor(ctx) { super(ctx, "fs"); }
+  async resolve(input, { cwd = data, signal } = {}) {
+    signal?.throwIfAborted();
+    return path.resolve(cwd, input);
+  }
+  async stat(target, signal) {
+    signal?.throwIfAborted();
+    const info = await fsStat(target);
+    return { type: info.isDirectory() ? "directory" : "file" };
+  }
+  processPath(target) { return target; }
+}
+await ctx.plugin(FixtureFs);
 class FixtureWorkingDirectory extends Service {
   constructor(ctx) {
     super(ctx, "workingDirectory");
   }
-  async ensure() {
-    return data;
+  directories = new Map();
+  get(session) {
+    return this.directories.get(session.id) ?? session.header.cwd ?? data;
   }
-  set(_session, cwd) {
-    assert.equal(cwd, data);
+  async ensure(agent) {
+    return this.get(agent.session);
+  }
+  async set(agent, cwd) {
+    this.directories.set(agent.id, cwd);
+    return cwd;
   }
 }
-await ctx.plugin(FixtureWorkingDirectory);
 for (const name of [
   "dsh-session-projection",
   "dsh-session",
   "dsh-session-title",
   "dsh-agent",
+  "dsh-working-directory",
   "dsh-system-prompt",
   "dsh-tools",
   "dsh-tool-executor-native",
   "dsh-agent-loop",
   "dsh-user-approval",
 ]) {
+  if (name === "dsh-working-directory") {
+    try {
+      require.resolve("@deepseek-ai/" + name);
+    } catch (error) {
+      if (error.code !== "MODULE_NOT_FOUND") {
+        throw error;
+      }
+      await ctx.plugin(FixtureWorkingDirectory);
+      continue;
+    }
+  }
   if (name === "dsh-tool-executor-native") {
     try {
       require.resolve("@deepseek-ai/" + name);
@@ -121,6 +151,7 @@ for (const name of [
   await ctx.plugin(
     plugin.default ?? plugin,
     name === "dsh-agent-loop" ? { agents: [], maxParallelToolCalls: 1 }
+      : name === "dsh-working-directory" ? { defaultDirectory: data }
       : name === "dsh-session-title" ? { fallbackMaxWords: 12, fallbackMaxBytes: 128, maxTitleBytes: 1024 } : {},
   );
 }
@@ -159,7 +190,7 @@ const makeHarness = () =>
   new Harness(
     { services: { get: (name) => ctx.get(name) }, llm },
     () => config,
-    { data },
+    { data, profile: data },
     {
       call: async (_tool, args, signal) => {
         signal.throwIfAborted();
@@ -401,8 +432,12 @@ try {
   } finally {
     offDelegated();
   }
+  const parent = ctx.agents.get(requests.at(-1).sessionId);
+  assert.equal(ctx.workingDirectory.get(parent.session), path.join(data, "workspace", "chat"));
+  await harness.run("审查规则", "工作区验证", [], [], undefined, undefined, undefined, "review:foo/bar", "review");
+  assert.equal(ctx.workingDirectory.get(ctx.agents.get(requests.at(-1).sessionId).session), path.join(data, "workspace", "review"));
   console.log(
-    "真实 DSH 验证通过：图片附件、会话标题、权限、原生 RAG/Skill 子代理与查询工具、JSONL 恢复、取消与重置。",
+    "真实 DSH 验证通过：通道工作区、图片附件、会话标题、权限、原生 RAG/Skill 子代理与查询工具、JSONL 恢复、取消与重置。",
   );
 } finally {
   await harness.close();

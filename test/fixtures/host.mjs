@@ -8,6 +8,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
     attachments = [],
     stored = new Map(),
     logs = new Map(),
+    headers = new Map(),
     permissionWrites = [],
     records = new Map(),
     failures = new Map(),
@@ -44,6 +45,8 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
     stored.set(id, conversation);
     const events = logs.get(id) ?? [];
     logs.set(id, events);
+    const header = headers.get(id) ?? { id, ...options.meta };
+    headers.set(id, header);
     const listeners = new Map(),
       tools = [],
       sections = [],
@@ -91,7 +94,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
       id,
       session: {
         id,
-        header: { id, ...options.meta },
+        header,
         events,
         append: (type, data) => events.push({ type, data }),
       },
@@ -226,6 +229,14 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
         ({
           agents,
           subagents,
+          workingDirectory: {
+            get: (session) => session.events.filter(event => event.type === "working-directory/change").at(-1)?.data.cwd ?? session.header.cwd,
+            set: async (agent, cwd, signal) => {
+              signal?.throwIfAborted();
+              agent.session.append("working-directory/change", { cwd });
+              return cwd;
+            },
+          },
           permissionPresets: permissions,
           sessionTitle: {
             get: (session) => session.events.filter((e) => e.type === "session/title").at(-1)?.data,
@@ -233,7 +244,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
           },
           sessionPersistence: {
             stat: async (id) =>
-              stored.has(id) ? { header: { id } } : undefined,
+              stored.has(id) ? { header: headers.get(id) } : undefined,
           },
           agentDefaultModel: { currentSelection: () => ({ ...selection }) },
           attachments: {

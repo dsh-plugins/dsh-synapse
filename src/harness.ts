@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import path from "node:path";
 import type { HostAPI } from "@dsh-plugin/dsh-loader";
 import type {
   ConfigSource,
@@ -12,6 +11,7 @@ import type {
 } from "./types.js";
 import type { McpManager } from "./mcp.js";
 import { SessionBindings } from "./session-bindings.js";
+import { safePath } from "./files.js";
 
 export type ApprovalAnswer = "allowed-once" | "rejected" | "cancelled";
 export type AskApproval = (request: {
@@ -144,8 +144,8 @@ export class Harness {
     const content = await this.content(input);
     const resident = sessionKey
       ? (this.residents.get(sessionKey) ??
-        (await this.acquire(selection, signal, sessionKey, onEvent)))
-      : await this.create(selection, signal);
+        (await this.acquire(selection, signal, sessionKey, onEvent, channel)))
+      : await this.create(selection, signal, undefined, channel);
     if (sessionKey) this.residents.set(sessionKey, resident);
     if (resident.turn) throw new Error("同一会话必须通过消息队列串行执行");
     const { handle, scope } = resident;
@@ -251,15 +251,16 @@ export class Harness {
     }
   }
 
-  private async acquire(selection, signal: AbortSignal, key: string, onEvent: AgentEvent) {
+  private async acquire(selection, signal: AbortSignal, key: string, onEvent: AgentEvent, channel: Channel) {
     try {
-      return await this.create(selection, signal, key);
+      return await this.create(selection, signal, key, channel);
     } catch (error) {
       signal.throwIfAborted();
       const unavailable = [
         "SessionAlreadyOwnedError", "SessionAlreadyExistsError",
         "SessionPersistenceNotFoundError", "SessionPersistenceCorruptionError",
         "SessionOwnershipLostError", "SessionFormatUnsupportedError",
+        "SessionWorkspaceChangedError",
       ].includes(error.name) || ["ENOENT", "EACCES", "EPERM"].includes(error.code);
       if (!unavailable) {
         throw error;
@@ -267,7 +268,7 @@ export class Harness {
       const previous = await this.bindings.get(key);
       await this.bindings.reset(key, signal);
       // 只替换本通道绑定，不释放其他调用方持有的会话；新建失败直接返回错误。
-      const replacement = await this.create(selection, signal, key);
+      const replacement = await this.create(selection, signal, key, channel);
       this.residents.set(key, replacement);
       onEvent("session.replaced", {
         previousSession: previous.id,
@@ -282,10 +283,11 @@ export class Harness {
     selection,
     signal: AbortSignal,
     key?: string,
+    channel: Channel = "chat",
   ): Promise<Resident> {
     const agents = this.loader.services.get("agents");
     if (!agents?.create) throw new Error("DSH Agent 服务不可用");
-    const cwd = path.join(this.paths.data, "sessions");
+    const cwd = await safePath(this.paths.profile, "workspace", channel);
     await mkdir(cwd, { recursive: true });
     const binding = key
       ? await this.bindings.get(key)
@@ -296,6 +298,11 @@ export class Harness {
       key && persistence?.stat
         ? await persistence.stat(id, { signal })
         : undefined;
+    const workingDirectory = this.loader.services.get("workingDirectory");
+    // 旧宿主只支持不可变的原始目录；保留旧记录并新建绑定，避免继续使用错误工作区。
+    if (stored && !workingDirectory?.set && stored.header.cwd !== cwd) {
+      throw Object.assign(new Error("历史会话需要切换到通道工作区"), { name: "SessionWorkspaceChangedError" });
+    }
     const preset = this.config().sessionPermission;
     const permissions = this.loader.services.get("permissionPresets");
     if (!stored) {
@@ -313,8 +320,11 @@ export class Harness {
       scope: undefined,
       seeded: Boolean(stored) || !binding.bootstrap,
     };
-    const setup = (scope, agent) => {
+    const setup = async (scope, agent) => {
       resident.scope = scope;
+      if (stored && workingDirectory?.set) {
+        await workingDirectory.set(agent, cwd, signal);
+      }
       // Use the host writer before publication; resumed sessions keep their log.
       if (!stored) permissions.set(agent.session, preset);
       const prompt = scope.get("systemPrompt"),

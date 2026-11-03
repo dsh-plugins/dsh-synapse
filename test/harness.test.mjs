@@ -8,6 +8,11 @@ import { template } from "../lib/host/config.js";
 import { Harness } from "../lib/host/harness.js";
 import { hostFixture } from "./fixtures/host.mjs";
 
+async function harnessPaths() {
+  const profile = await mkdtemp(path.join(os.tmpdir(), "synapse-harness-"));
+  return { profile, data: path.join(profile, "data") };
+}
+
 test("native runs inherit current host selection, import attachments and dispose on cancellation", async () => {
   const c = defaultsFor(template.fields);
   const host = hostFixture(async ({ message, signal }) => {
@@ -22,7 +27,7 @@ test("native runs inherit current host selection, import attachments and dispose
   const harness = new Harness(
     host.loader,
     () => c,
-    { data: await mkdtemp(path.join(os.tmpdir(), "synapse-harness-")) },
+    await harnessPaths(),
     {},
   );
   try {
@@ -62,7 +67,7 @@ test("native host errors propagate and approval answers stay in the requesting a
   const harness = new Harness(
     host.loader,
     () => defaultsFor(template.fields),
-    { data: await mkdtemp(path.join(os.tmpdir(), "synapse-harness-")) },
+    await harnessPaths(),
     {},
   );
   try {
@@ -100,7 +105,7 @@ test("every new Synapse session uses the selected native permission preset befor
   const harness = new Harness(
     host.loader,
     () => c,
-    { data: await mkdtemp(path.join(os.tmpdir(), "synapse-permissions-")) },
+    await harnessPaths(),
     {},
   );
   try {
@@ -132,9 +137,7 @@ test("every new Synapse session uses the selected native permission preset befor
 test("permission changes affect new/reset sessions while residents and persisted restores retain their permissions", async () => {
   const c = defaultsFor(template.fields),
     host = hostFixture(),
-    paths = {
-      data: await mkdtemp(path.join(os.tmpdir(), "synapse-permissions-")),
-    };
+    paths = await harnessPaths();
   const create = () => new Harness(host.loader, () => c, paths, {});
   let harness = create();
   const run = (key = "chat:group:123") =>
@@ -164,7 +167,7 @@ test("permission changes affect new/reset sessions while residents and persisted
     await run();
     assert.equal(host.resumed[0].agent.id, id);
     assert.equal(
-      host.resumed[0].agent.session.events.at(-1).data.preset,
+      host.resumed[0].agent.session.events.filter(event => event.type === "permission/preset").at(-1).data.preset,
       "read-only",
     );
     assert.equal(host.permissionWrites.length, 2);
@@ -186,7 +189,7 @@ test("unavailable Auto integration or native permission writer blocks new sessio
   const harness = new Harness(
     host.loader,
     () => c,
-    { data: await mkdtemp(path.join(os.tmpdir(), "synapse-permissions-")) },
+    await harnessPaths(),
     {},
   );
   try {
