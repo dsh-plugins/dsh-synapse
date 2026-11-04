@@ -15,9 +15,9 @@ serializes incoming message preparation, and forwards context resets to DSH. All
 remain included. Hermes bridge code includes upstream's attribution to Amorter
 and qq-hermes-bridge (MIT); those notices are preserved in source.
 
-`src/qq-send-queue.ts` 实现按 QQ 会话合并、全局轮流限速及超长消息转聊天记录。`scripts/build.mjs` 将其接入上游公开发送方法，并让逐句回复先提交完整批次，发送完成后再结束本轮；私聊可撤回回执保持独立。上游源文件保留原样。
+`src/qq-send-queue.ts` implements per-conversation message merging, global round-robin rate limiting, and forward-message packing for long outputs. `scripts/build.mjs` wires this queue into the upstream public send methods, submits sentence-split replies as complete batches before finishing a turn, and keeps recallable private-chat receipts separate while leaving the upstream source files intact.
 
-`scripts/activity-adapter.mjs` 将 QQ 群的 AI 输入接到宿主统一状态模块，保存未触发背景、异步缓存图片，并处理概率回复、空闲事件、管理命令与发送完成通知。策略通过 IPC 热更新；空闲事件保留系统来源和非管理员权限。原生命令、自动卡片、私聊与 Discord 的其他处理钩子继续使用上游实现。
+`scripts/activity-adapter.mjs` connects QQ group AI inputs to the host activity state, recording untriggered background messages, caching images asynchronously, and handling probabilistic replies, idle prompts, admin commands, and delivery completion notifications. Policies hot-reload over IPC, and idle events run under a non-admin system identity. Native commands, auto-cards, private chats, and Discord hooks continue to use the upstream implementation.
 
 Modified distribution: DSH Synapse contributors, 2026, AGPL-3.0-only.
 When offering this modified program over a network, offer recipients the

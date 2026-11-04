@@ -28,21 +28,21 @@ export const template = defineConfig({
   packageName: "@dsh-plugin/dsh-synapse",
   title: "Synapse · 通道与记忆",
   description:
-    "聊天、审查和自总结使用所选模型与 DSH Agent 运行时。各功能由 dsh-loader 在此卡片内统一配置和保存。",
+    "将 QQ、Discord 聊天与 GitHub 审查接入 DSH，支持本地混合记忆与 Skill 总结。",
   fields: [
     flag("enabled", "启用机器人"),
     {
       type: "model",
       key: "chatModel",
       label: "默认聊天模型",
-      description: "用于聊天及聊天自总结，留空时使用 DSH 默认模型。",
+      description: "用于聊天和总结任务，留空时使用 DSH 默认模型。",
       default: null,
     },
     {
       type: "model",
       key: "reviewModel",
       label: "默认审查模型",
-      description: "用于 GitHub 审查及审查自总结，留空时使用 DSH 默认模型。",
+      description: "用于 GitHub 审查和总结任务，留空时使用 DSH 默认模型。",
       default: null,
     },
     collapsibleGroup("OneBot · NapCat / Snowluma", [
@@ -100,14 +100,14 @@ export const template = defineConfig({
       flag("reranker", "启用本地 bge-reranker-base"),
       flag("learnMemory", "总结重要事项到长期记忆", true),
       {
-        ...text("memoryPrompt", "主动记录记忆的提示词", "你应主动判断对话或审查中哪些信息值得长期保留，包括已核实的重要事实、用户偏好、长期约束和关键决定。发现这些内容时，先调用 synapse_memory_search 检查已有记忆，再调用 synapse_memory_save 将新信息写入当前通道的 RAG 库，无需等待用户要求记住。记忆应简洁、具体且有依据，必要时说明适用对象与条件；不要记录密钥、凭据、未经证实的推测或短暂状态。只有工具确认写入成功后才能声称已保存；无需为普通闲聊制造记忆。", "textarea"),
-        description: "用于主模型主动委派记忆子代理及其总结规则，保存后对下一次请求生效。",
+        ...text("memoryPrompt", "主动记录记忆的提示词", "在对话或审查中留意值得长期保留的信息，如已核实的事实、用户偏好、长期约束和关键决定。发现此类信息时，先调用 synapse_memory_search 查重，再调用 synapse_memory_save 写入当前通道的记忆库，不必等用户主动要求。记忆内容应简明具体，需要时注明适用范围；切勿记录密钥、凭据、未经核实的推测或临时状态。仅在工具返回写入成功后才告知用户已保存；日常闲聊不必记录。", "textarea"),
+        description: "用于记忆总结的判断与执行规则，保存后对下一次请求生效。",
         dialog: { id: "memory-prompt-editor", label: "编辑记忆提示词" },
       },
       flag("learnSkills", "自动总结 Skill", true),
       {
-        ...text("skillPrompt", "主动总结 Skill 的提示词", "你应主动识别本次任务中已经验证成功、以后可复用的操作步骤，并在完成任务时总结为 Skill。先调用 synapse_skill_list 和 synapse_skill_read 查找可复用或需要更新的内容，再调用 synapse_skill_save 保存；新增 Skill 使用当前通道的 auto-chat- 或 auto-review- 名称前缀，更新时提供读取到的 revision。写明适用场景、前提、具体步骤、验证方法和已确认的注意事项，避免重复创建。不要把猜测、未经验证的方案、密钥或一次性聊天内容保存为 Skill，也不要借 Skill 扩大工具权限。只有工具成功返回后才能确认已保存。", "textarea"),
-        description: "用于主模型主动委派 Skill 子代理及其总结规则，保存后对下一次请求生效。",
+        ...text("skillPrompt", "主动总结 Skill 的提示词", "在完成任务后，将本次已验证通过且后续可复用的操作步骤整理为 Skill。先调用 synapse_skill_list 和 synapse_skill_read 查阅现有内容，再调用 synapse_skill_save 保存；新建 Skill 使用当前通道的 auto-chat- 或 auto-review- 前缀，更新已有条目时传入读取到的 revision。写明适用场景、前置条件、操作步骤、验证方式与注意事项，避免重复创建。切勿将猜测、未验证方案、密钥或单次对话保存为 Skill，也不得借此扩大工具权限。仅在工具返回成功后才确认已保存。", "textarea"),
+        description: "用于 Skill 总结的判断与执行规则，保存后对下一次请求生效。",
         dialog: { id: "skill-prompt-editor", label: "编辑 Skill 提示词" },
       },
       num("maxMemories", "最大记忆条数", 20000, 100, 1000000),

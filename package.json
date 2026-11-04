@@ -1,7 +1,7 @@
 {
   "name": "@dsh-plugin/dsh-synapse",
   "version": "0.1.0",
-  "description": "DSH QQ/Discord bot, GitHub review and local hybrid memory",
+  "description": "Connect QQ, Discord, and GitHub reviews to DSH",
   "type": "module",
   "main": "lib/host/index.js",
   "exports": {
@@ -15,6 +15,8 @@
     "vendor",
     "cordis.patch.yml",
     "README.md",
+    "README.zh_CN.md",
+    "docs",
     "LICENSE",
     "NOTICE.md",
     "scripts",

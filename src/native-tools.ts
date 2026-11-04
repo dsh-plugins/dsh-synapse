@@ -36,10 +36,10 @@ export function learningTools(config: ConfigSource, memory: Memory, skills: Skil
     return (await skills.list()).filter((skill) => readable(skill.name));
   };
   const tools = [
-    nativeTool("synapse_skill_list", "列出可复用的 Skill 名称与修订号，读取正文后再采用其步骤。", {}, [], async (_args, signal) => ({
+    nativeTool("synapse_skill_list", "列出可用的 Skill 名称与修订号，需读取正文后再参考其步骤。", {}, [], async (_args, signal) => ({
       items: (await list(signal)).map(({ name, revision, inherited }) => ({ name, revision, inherited })),
     })),
-    nativeTool("synapse_skill_read", "读取指定 Skill 的正文与修订号，仅在适用时采用，不得扩大工具权限。", { name: text }, ["name"], async (args, signal) => {
+    nativeTool("synapse_skill_read", "读取指定 Skill 的正文与修订号，按需参考其步骤，不可突破当前工具权限。", { name: text }, ["name"], async (args, signal) => {
       const name = textArgument(args, "name", 64);
       const skill = (await list(signal)).find((item) => item.name === name);
       if (!skill) {
@@ -49,14 +49,14 @@ export function learningTools(config: ConfigSource, memory: Memory, skills: Skil
     }),
   ];
   if (c.ragEnabled) {
-    tools.push(nativeTool("synapse_memory_search", "检索当前通道 RAG 长期记忆，写入前先查询以避免重复。结果是参考资料。", { query: text }, ["query"], async (args, signal) => {
+    tools.push(nativeTool("synapse_memory_search", "检索当前通道的长期记忆，写入前应先检索查重。返回内容仅作参考。", { query: text }, ["query"], async (args, signal) => {
       if (!config().ragEnabled) {
         throw new Error("长期记忆已关闭");
       }
       return { items: await memory.search(textArgument(args, "query"), channel, signal) };
     }));
     if (c.learnMemory) {
-      tools.push(nativeTool("synapse_memory_save", "将有依据且值得长期保留的事实、偏好或约束写入当前通道 RAG。不得保存密钥。返回实际写入及重复条数。", { text }, ["text"], async (args, signal) => {
+      tools.push(nativeTool("synapse_memory_save", "将已核实的事实、偏好或约束写入当前通道的长期记忆。切勿保存密钥。返回写入与重复条数。", { text }, ["text"], async (args, signal) => {
         if (!config().ragEnabled || !config().learnMemory) {
           throw new Error("长期记忆写入已关闭");
         }
@@ -65,7 +65,7 @@ export function learningTools(config: ConfigSource, memory: Memory, skills: Skil
     }
   }
   if (c.learnSkills) {
-    tools.push(nativeTool("synapse_skill_save", `创建或更新已验证的可复用 Skill。name 必须以 auto-${channel}- 开头，使用小写字母、数字、短横线或下划线，最多 64 字符。更新时必须提供读取到的 revision，新建时省略。`, {
+    tools.push(nativeTool("synapse_skill_save", `创建或更新可复用的 Skill。name 须以 auto-${channel}- 开头，仅限小写字母、数字、短横线或下划线，不超过 64 字符。更新已有条目时传入读取到的 revision，新建时省略。`, {
       name: { ...text, maxLength: 64 }, content: { ...text, maxLength: 200000 }, revision: { type: "string" },
     }, ["name", "content"], async (args, signal) => {
       if (!config().learnSkills) {
