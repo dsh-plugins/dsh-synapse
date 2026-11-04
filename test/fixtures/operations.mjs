@@ -6,6 +6,8 @@ import { template } from "../../lib/host/config.js";
 import { registerOperations } from "../../lib/host/operations.js";
 import { SkillStore } from "../../lib/host/files.js";
 import { Memory } from "../../lib/host/memory.js";
+import { ChatState } from "../../lib/host/chat-state.js";
+import { ChatActivity } from "../../lib/host/chat-activity.js";
 
 export async function operationFixture({ serviceAvailable = true } = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), "synapse-operations-"));
@@ -20,8 +22,12 @@ export async function operationFixture({ serviceAvailable = true } = {}) {
   const store = new ConfigStore(profile),
     handle = await store.register(null, template);
   const config = () => handle.get().value;
+  const activity = new ChatActivity({ state: new ChatState(path.join(paths.data, "chat-state.sqlite")), config,
+    images: { start: async () => {}, process: async () => {}, collect: async () => {}, close: async () => {} },
+    cloud: { message: async () => ({ boost: 0, words: [] }), removeUsers: async () => {}, close: async () => {} } });
   const service = {
     config,
+    activity,
     paths,
     skills: new SkillStore(paths),
     memory: new Memory(
@@ -76,6 +82,7 @@ export async function operationFixture({ serviceAvailable = true } = {}) {
     async close() {
       handle.dispose();
       await queue;
+      await activity.close();
       service.memory.close();
       store.dispose();
       const target = path.resolve(home);

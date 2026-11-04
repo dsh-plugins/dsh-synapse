@@ -110,6 +110,31 @@ test("管理表格与弹窗完成 Skill 预览编辑、MCP 草稿测试保存、
   await click("重试", container);
   assert(container.querySelector("table").textContent.includes("等待处理"));
 
+  await render("activity");
+  await until(() => !container.querySelector(".arco-btn-loading"));
+  await click("编辑群聊策略", container); await until(() => modal());
+  const base = modal().querySelector('input[aria-label="基础概率"]') || modal().querySelector('[aria-label="基础概率"] input');
+  assert(base, "概率编辑器需要提供百分比输入");
+  await act(async () => { Simulate.change(base, { target: { value: "3.25" } }); Simulate.blur(base); });
+  const blockedSelector = 'textarea[aria-label="概率回复屏蔽词"]';
+  await input(blockedSelector, "第一项"); await input(blockedSelector, "第一项\n");
+  assert.equal(document.querySelector(blockedSelector).value, "第一项\n");
+  await input(blockedSelector, "第一项\n第二项");
+  const botSelector = 'textarea[aria-label="其他机器人 QQ 号"]';
+  await input(botSelector, "111\n"); assert.equal(document.querySelector(botSelector).value, "111\n");
+  await input(botSelector, "111\n222");
+  await click("保存", modal()); await until(() => !modal());
+  assert.equal(f.handle.get().value.activity.probability.baseBps, 325);
+  assert.deepEqual(f.handle.get().value.activity.blockedWords, ["第一项", "第二项"]);
+  assert.deepEqual(f.handle.get().value.activity.botUsers, [111, 222]);
+  await click("编辑群聊策略", container); await until(() => modal());
+  await input('input[aria-label="新增群号"]', "123");
+  await click("新增群策略", modal());
+  assert(modal().querySelector("table").textContent.includes("123"));
+  assert(modal().textContent.includes("继承全局参数"));
+  await click("保存", modal()); await until(() => !modal());
+  assert.equal(f.handle.get().value.activity.groups[0].groupId, 123);
+
   const invoke = client.invoke;
   let finishSave, pendingSignal;
   client.invoke = (...args) => args[1] === "skills.save" ? new Promise((resolve, reject) => {

@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { once } from "node:events";
 import { atomicWrite } from "./files.js";
 import { featureFiles } from "./feature-config.js";
+import { randomUUID } from "node:crypto";
+import type { IdleActivation } from "./chat-activity.js";
 export class Bot {
   paths: PluginPaths;
   config: ConfigSource;
@@ -15,6 +17,8 @@ export class Bot {
   stopping: boolean;
   child: import("node:child_process").ChildProcess;
   stderr: string;
+  private activations = new Map<string, { resolve(): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
+  private restarting?: Promise<void>;
 
   constructor(
     paths: PluginPaths,
@@ -89,6 +93,7 @@ export class Bot {
     await atomicWrite(marker, JSON.stringify(applied));
     this.stopping = false;
     this.state = "starting";
+    this.gateway.botEpoch = randomUUID();
     this.child = fork(
       fileURLToPath(new URL("../bot.cjs", import.meta.url)),
       [],
@@ -100,6 +105,7 @@ export class Bot {
           ...process.env,
           SYNAPSE_PROFILE: this.paths.profile,
           SYNAPSE_HOME: this.paths.home,
+          SYNAPSE_BOT_EPOCH: this.gateway.botEpoch,
         },
       },
     );
@@ -107,8 +113,17 @@ export class Bot {
     this.child.stderr?.on("data", (chunk) => {
       this.stderr = (this.stderr + chunk.toString()).slice(-6000);
     });
-    this.child.on("message", (msg: { type?: string }) => {
-      if (msg?.type === "ready") this.state = "running";
+    this.child.on("message", (msg: { type?: string; id?: string; error?: string; runId?: string; failed?: boolean; groupId?: string; eventId?: string }) => {
+      if (msg?.type === "ready") { this.state = "running"; this.updateActivity(); }
+      if (msg?.type === "activity-ack") {
+        const pending = this.activations.get(msg.id);
+        if (pending) { clearTimeout(pending.timer); this.activations.delete(msg.id); if (msg.error) { pending.reject(new Error(msg.error)); } else { pending.resolve(); } }
+      }
+      if (msg?.type === "activity-finished") { void this.gateway.finishDelivery(msg.runId, msg.failed).catch(this.onError); }
+      if (msg?.type === "activity-sent") {
+        try { this.gateway.activity?.sent(msg.groupId, msg.eventId); }
+        catch (cause) { this.onError(cause); }
+      }
       if (msg?.type === "restart" && !this.stopping)
         void this.restart().catch(this.onError);
     });
@@ -118,12 +133,32 @@ export class Bot {
     });
     this.child.on("exit", (code) => {
       this.state = this.stopping ? "stopped" : `exited (${code})`;
+      for (const pending of this.activations.values()) { clearTimeout(pending.timer); pending.reject(new Error("Bot 进程已退出")); }
+      this.activations.clear();
+      if (!this.stopping) { void this.gateway.botDisconnected().catch(this.onError); }
     });
     // Parent disconnect guarantees the upstream child cannot outlive its owner.
   }
-  async restart() {
-    await this.stop();
-    await this.start();
+  restart(): Promise<void> {
+    if (!this.restarting) { this.restarting = this.stop().then(() => this.start()).finally(() => { this.restarting = undefined; }); }
+    return this.restarting;
+  }
+  updateActivity() {
+    if (this.child?.connected) {
+      const c = this.config();
+      this.child.send({ type: "activity-config", activity: c.activity, blockedUsers: c.modules.chat.blockedUsers }, error => { if (error) { this.onError(error); } });
+    }
+  }
+  activate(event: IdleActivation): Promise<void> {
+    if (!this.child?.connected || this.state !== "running") { return Promise.reject(new Error("Bot 尚未就绪")); }
+    const id = randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.activations.delete(id); reject(new Error("Bot 主动事件提交超时")); }, 60000);
+      this.activations.set(id, { resolve, reject, timer });
+      this.child.send({ type: "activity-idle", id, event }, error => {
+        if (error && this.activations.delete(id)) { clearTimeout(timer); reject(error); }
+      });
+    });
   }
   notify(event, payload) {
     if (this.child?.connected)
@@ -140,6 +175,7 @@ export class Bot {
       child.kill();
       await done;
     }
+    await this.gateway.botDisconnected();
     this.state = "stopped";
   }
   async liveFeatures() {

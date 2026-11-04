@@ -2,6 +2,7 @@ import { defineConfig, validateValues } from "@dsh-plugin/dsh-loader/config";
 import type { ConfigField } from "@dsh-plugin/dsh-loader/config";
 import type { SynapseConfig } from "./types.js";
 import { panels } from "./operation-panels.js";
+import { activityField, validateActivity } from "./activity-config.js";
 import {
   text,
   flag,
@@ -115,6 +116,7 @@ export const template = defineConfig({
       ...object("modules", "聊天与通知功能", moduleFields),
       dialog: { id: "modules-editor", label: "编辑聊天与通知功能" },
     },
+    activityField,
     {
       ...array("mcpServers", "MCP 服务", mcpServerItem),
       hidden: true,
@@ -125,6 +127,7 @@ export const template = defineConfig({
 
 export function validateConfig(c: SynapseConfig) {
   validateValues(template.fields, c as any);
+  validateActivity(c.activity);
   const unique = (values: string[], label: string) => {
     if (new Set(values).size !== values.length)
       throw new Error(`${label}不能重复`);

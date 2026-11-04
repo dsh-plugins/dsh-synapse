@@ -3,6 +3,7 @@ import type {
   ConfigHandle,
   ConfigOperationContext,
   ConfigOperationResult,
+  ConfigValue,
 } from "@dsh-plugin/dsh-loader/config";
 import type { SynapseConfig } from "./types.js";
 import type { createService } from "./index.js";
@@ -57,6 +58,29 @@ export function registerOperations(
     return current;
   };
   const operations: Record<string, Operation> = {
+    "activity.load": () => {
+      const current = handle.get();
+      return { value: { settings: current.value.activity as unknown as ConfigValue }, resource: { id: "chat-activity", revision: current.revision } };
+    },
+    "activity.save": async (_s, { input, resource, signal }) => {
+      const current = handle.get();
+      if (resource?.id !== "chat-activity" || current.revision !== resource.revision) { throw new ConfigError("conflict", "配置已变更，请关闭弹窗后重新载入"); }
+      const activity = input.settings as unknown as SynapseConfig["activity"];
+      validateConfig({ ...current.value, activity });
+      signal.throwIfAborted();
+      const saved = await handle.update({ activity }, current.revision);
+      return { value: { settings: saved.value.activity as unknown as ConfigValue }, resource: { id: "chat-activity", revision: saved.revision } };
+    },
+    "activity.status": s => ({ value: { items: s.activity.status() } }),
+    "activity.logs": (s, { input }) => {
+      const date = (value: unknown) => {
+        if (!value) { return undefined; }
+        const result = Date.parse(String(value));
+        if (!Number.isFinite(result)) { throw new ConfigError("validation", "日志查询时间无效"); }
+        return result;
+      };
+      return { value: { items: s.activity.state.logs({ groupId: String(input.groupId || ""), type: String(input.type || ""), from: date(input.from), to: date(input.to), beforeId: Number(input.beforeId) || undefined }) } };
+    },
     "skills.list": async (s) => ({
       value: {
         items: (await s.skills.list()).map((x) => ({
@@ -242,7 +266,7 @@ export function registerOperations(
         }
       };
       // MCP 草稿测试与配置修复不能被机器人启动失败阻塞。
-      return id.startsWith("mcp.") ? invoke() : withService(invoke);
+      return id.startsWith("mcp.") || ["activity.load", "activity.save"].includes(id) ? invoke() : withService(invoke);
     });
   }
   handle.registerOperation("status.read", () => ({ value: status() }));

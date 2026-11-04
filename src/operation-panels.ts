@@ -1,9 +1,20 @@
 import type { ConfigPanel } from "@dsh-plugin/dsh-loader/config";
-import { text, flag, select, mcpServerItem } from "./feature-config.js";
+import { text, flag, select, mcpServerItem, num } from "./feature-config.js";
+import { activityField } from "./activity-config.js";
 
 const channel = () => select("channel", "记忆分类", [["chat", "聊天（QQ / Discord 共享）"], ["review", "GitHub 审查"]]);
 
 export const panels: ConfigPanel[] = [
+  {
+    id: "activity", title: "群聊上下文与主动回复", custom: true,
+    fields: [{ ...activityField, key: "settings", hidden: false }, text("groupId", "群号"), text("type", "日志类型"), text("from", "开始时间"), text("to", "结束时间"), num("beforeId", "上一页 ID", 0)],
+    operations: [
+      { id: "activity.load", input: [], readOnly: true },
+      { id: "activity.save", input: ["settings"], requiresRevision: true },
+      { id: "activity.status", input: [], readOnly: true },
+      { id: "activity.logs", input: ["groupId", "type", "from", "to", "beforeId"], readOnly: true },
+    ],
+  },
   {
     id: "skills", title: "Skill 管理", custom: true,
     fields: [text("selected", "已选 Skill"), text("name", "Skill 名称"), { ...text("content", "Markdown 文档", "", "textarea"), max: 200000 }, flag("confirmDelete", "确认删除")],

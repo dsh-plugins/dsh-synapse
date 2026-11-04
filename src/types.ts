@@ -1,5 +1,6 @@
 import type { HostAPI, CordisContext } from "@dsh-plugin/dsh-loader";
 import type { ConfigModelValue } from "@dsh-plugin/dsh-loader/config";
+import type { ActivityConfig } from "./activity-config.js";
 export type Channel = "chat" | "review";
 /** 聊天网关提供的发送者信息，工具执行时用于限定群号和管理权限。 */
 export interface ChatRoute {
@@ -13,6 +14,16 @@ export interface ChatRoute {
 export interface RunContext {
   title?: string;
   route?: ChatRoute;
+  submission?: NativeSubmission;
+}
+/** 原生输入的可恢复提交标识；只有持久化成功后才确认背景批次。 */
+export interface NativeSubmission {
+  batchId: string;
+  background: string;
+  source?: "system" | "user";
+  read?(): { input: string; background: string };
+  prepared(sessionId: string, messageId: string): void;
+  committed(sessionId: string, messageId: string): void;
 }
 export interface PluginPaths {
   profile: string;
@@ -32,6 +43,7 @@ export interface McpSpec {
   allowedTools: string[];
 }
 export interface SynapseConfig {
+  activity: ActivityConfig;
   enabled: boolean;
   chatModel: ConfigModelValue | null;
   reviewModel: ConfigModelValue | null;

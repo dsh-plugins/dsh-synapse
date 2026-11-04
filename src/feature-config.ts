@@ -120,7 +120,7 @@ export const moduleFields: ConfigField[] = [
     ids(),
     ids("admins", "对话管理员 QQ"),
     ids("allowedUsers", "允许对话的 QQ 用户（空为全部）"),
-    ids("blockedUsers", "屏蔽的 QQ 用户"),
+    ids("blockedUsers", "AI 忽略名单（QQ 用户）"),
     flag("requireMention", "群聊需要 @机器人", true),
     strings("keywordTriggers", "触发关键词"),
     num("progressRateLimitSec", "进度更新最小间隔（秒）", 15),

@@ -75,6 +75,9 @@ export class Agent {
     return this.queue.run(
       sessionKey,
       async (queuedSignal) => {
+        if (channel === "chat" && context.route && context.route.type !== "discord" && [...this.config().modules.chat.blockedUsers, ...this.config().activity.botUsers].includes(Number(context.route.userId)) && context.submission?.source !== "system") {
+          throw new Error("发言者已被 AI 忽略，本轮输入没有提交");
+        }
         onEvent("run.started", { session: sessionKey });
         const system =
           (await this.context(input, channel)) +
@@ -100,6 +103,7 @@ export class Agent {
           channel,
           context.title,
           instruction ? [instruction] : [],
+          context.submission,
         );
         return output;
       },
@@ -109,6 +113,8 @@ export class Agent {
   reset(sessionKey: string) {
     return this.queue.reset(sessionKey, () => this.harness.reset(sessionKey));
   }
+  busy(sessionKey: string): boolean { return this.queue.busy(sessionKey); }
+  whenCurrentSettled(sessionKey: string): Promise<void> { return this.queue.whenCurrentSettled(sessionKey); }
   async close() {
     await this.queue.close();
     await this.harness.close();

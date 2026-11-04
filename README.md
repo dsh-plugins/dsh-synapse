@@ -55,6 +55,14 @@ You can adjust conversation permissions under "Task Execution Limits → Permiss
 
 Changes apply only to new or reset conversations. Existing and restored conversations keep their permissions. The MCP allowlist below still determines which tools can be called.
 
+## 群聊上下文与主动回复
+
+已启用聊天的 QQ 群独立持久化最近 100 条未触发消息，原生输入事件与持久化确认后清理批次。图片、图片表情及引用图片按内容哈希缓存到 `<profile>/data/dsh-synapse/temp/imgs/`，输入保留路径，模型按需调用标准读图工具；默认保留 7 天，并保护待提交和执行中的引用。
+
+设置页新增群聊策略编辑器、运行状态表和可按群、类型、时间筛选的日志表。概率回复与空闲消息都默认关闭，需要全局与逐群同时启用，支持继承全局参数、群级自定义和不中断回复的热更新。默认概率 3%，词云按 48 小时窗口与 18 小时半衰期加权，加成最多 200%；空闲窗口为 15–45 分钟，25% 概率命中后延迟 30–80 秒，真人消息会取消延迟事件。两类功能均受冷却、额度与群忙碌状态约束，空闲消息默认在上海时间 00:00–09:00 静默。
+
+AI 忽略名单只影响 AI 流程，命令、自动卡片与 Discord 转发保留。支持 `/synapse probability`、`/synapse idle`、`/synapse blockword` 和 `/synapse logs` 管理命令，全局修改仅限 operators。完整参数和恢复规则见[群聊功能说明](README.zh_CN.md#群聊上下文与主动回复)。
+
 ## Persona, Memory & Skills
 
 聊天与审查均继承宿主 `standard` 预设的系统提示词、工具及原生 AGENTS.md 加载机制。`<dsh_home>/SOUL.md` 提供聊天补充规则，`<dsh_home>/AGENTS.md` 提供审查补充规则，profile 下的同名文件优先。这些文件通过宿主渲染器作为带来源路径的用户角色规则上下文注入，标准系统提示词保留；修改、删除和恢复去重均在后续请求中生效。

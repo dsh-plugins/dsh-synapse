@@ -123,7 +123,11 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
         id,
         header,
         events,
-        append: (type, data) => events.push({ type, data }),
+        append: (type, data) => {
+          const event = { type, data };
+          events.push(event);
+          listeners.get("session/event")?.(agent.session, event);
+        },
       },
       ctx: scope,
       model: { select: (s) => selected.push(s) },
@@ -267,6 +271,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
       get: (name) =>
         ({
           agents,
+          sessions: { flush: async () => true },
           subagents,
           workspaceRegistry,
           agentPresets: {
@@ -294,6 +299,12 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
           sessionPersistence: {
             stat: async (id) =>
               stored.has(id) ? { header: headers.get(id) } : undefined,
+            flush: async () => {},
+            open: async (id, access) => {
+              if (access !== "read") { throw new Error("测试只读句柄不接受写入"); }
+              if (!logs.has(id)) { throw Object.assign(new Error("会话不存在"), { name: "SessionPersistenceNotFoundError" }); }
+              return { read: async (offset = 0, length = Infinity) => ({ events: logs.get(id).slice(offset, offset + length) }), close: async () => {} };
+            },
           },
           agentDefaultModel: { currentSelection: () => ({ ...selection }) },
           attachments: {

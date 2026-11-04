@@ -15,6 +15,10 @@ import { Gateway } from "../lib/host/gateway.js";
 import { Agent } from "../lib/host/agent.js";
 import { hostFixture } from "./fixtures/host.mjs";
 import { apply } from "../lib/host/index.js";
+import { ChatState } from "../lib/host/chat-state.js";
+import { ChatImages } from "../lib/host/chat-images.js";
+import { ChatActivity } from "../lib/host/chat-activity.js";
+import { AsyncWordCloud } from "../lib/host/word-cloud.js";
 const waitFor = async (fn, ms = 10000) => {
   const until = Date.now() + ms;
   while (Date.now() < until) {
@@ -130,6 +134,9 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     return "hello";
   });
   const agent = new Agent({ loader: host.loader, config: () => c, paths: { home, profile, data, skills: path.join(profile, "skills") }, memory: {}, skills: { retrieve: async () => [] }, mcp: { available: async () => [] } });
+  const state = new ChatState(path.join(data, "chat-state.sqlite"));
+  const activity = new ChatActivity({ state, config: () => c, images: new ChatImages({ home, profile, data }, state, () => c), cloud: new AsyncWordCloud(path.join(data, "chat-state.sqlite")) });
+  await activity.recover((...args) => agent.harness.hasInput(...args));
   const gateway = new Gateway(
       {
         run: async (...args) => {
@@ -140,9 +147,11 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
           resets.push(key);
           await agent.reset(key);
         },
+        whenCurrentSettled: key => agent.whenCurrentSettled(key),
       },
       () => c,
       (e) => errors.push(e.message),
+      activity,
     );
   await gateway.start();
   const bot = new Bot(
@@ -262,6 +271,7 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     await bot.stop();
     await gateway.close();
     await agent.close();
+    await activity.close();
     for (const s of ws.clients) s.terminate();
     await new Promise((r) => ws.close(r));
     await new Promise((r) => http.close(r));

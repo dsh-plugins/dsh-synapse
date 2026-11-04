@@ -4,6 +4,7 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { body, json, equalSecret } from "./http.js";
 import type { ApprovalAnswer } from "./harness.js";
 import { chatSessionKey, chatRunContext } from "./session-bindings.js";
+import type { ChatActivity } from "./chat-activity.js";
 interface Run {
   created: number;
   events: any[];
@@ -13,6 +14,16 @@ interface Run {
   task?: Promise<void>;
   approval?: (answer: ApprovalAnswer) => void;
   approvalQueue: Promise<unknown>;
+  groupId?: string;
+  batchId?: string;
+  triggerId?: string;
+  failed?: boolean;
+  delivered?: boolean;
+  submissionKey?: string;
+  finishing?: Promise<void>;
+  finishRequested?: boolean;
+  finishFailed?: boolean;
+  execution?: Promise<void>;
 }
 export class Gateway {
   agent: import("./agent.js").Agent;
@@ -26,11 +37,15 @@ export class Gateway {
   gc: NodeJS.Timeout;
   background = new Set<Promise<unknown>>();
   shutdown = new AbortController();
+  private preparing = new Map<string, { controller: AbortController; done: Promise<void> }>();
+  botEpoch?: string;
+  private disconnecting?: Promise<void>;
 
   constructor(
     agent: import("./agent.js").Agent,
     config: ConfigSource,
     onError: ErrorSink,
+    public activity?: ChatActivity,
   ) {
     Object.assign(this, { agent, config, onError });
     this.token = randomBytes(32).toString("hex");
@@ -53,17 +68,56 @@ export class Gateway {
     });
     this.url = `http://127.0.0.1:${(this.server.address() as import("node:net").AddressInfo).port}`;
     this.gc = setInterval(() => {
-      for (const [id, run] of this.runs)
-        if (run.done && Date.now() - run.created > 600000) this.runs.delete(id);
+      for (const [id, run] of this.runs) {
+        if (run.finishRequested && !run.delivered && !run.finishing) { void this.finishDelivery(id, run.finishFailed).catch(this.onError); }
+        if (run.done && (!run.groupId || run.delivered) && Date.now() - run.created > 600000) { this.runs.delete(id); }
+      }
     }, 60000).unref();
   }
   async handle(req, res) {
     if (!equalSecret(req.headers.authorization, `Bearer ${this.token}`))
       return json(res, { error: "Unauthorized" }, 401);
+    const epoch = this.botEpoch;
+    if (epoch && req.headers["x-synapse-bot"] !== epoch) { return json(res, { error: "Bot 进程已更换" }, 409); }
     const url = new URL(req.url, "http://localhost");
+    if (this.activity && url.pathname.startsWith("/v1/activity/") && req.method === "POST") {
+      const data = JSON.parse((await body(req)).toString());
+      if (epoch !== this.botEpoch) { return json(res, { error: "Bot 进程已更换" }, 409); }
+      const action = url.pathname.slice("/v1/activity/".length);
+      if (action === "observe") {
+        if (epoch !== this.botEpoch) { return json(res, { error: "Bot 进程已更换" }, 409); }
+        const observed = await this.activity.observe(data);
+        if (epoch !== this.botEpoch) { this.activity.abandon(observed.seq, "Bot 在消息判定期间已重启"); return json(res, { error: "Bot 进程已更换" }, 409); }
+        return json(res, observed);
+      }
+      if (action === "identity") { this.activity.identity(data.selfId); return json(res, { ok: true }); }
+      if (action === "sent") { this.activity.sent(data.groupId, data.eventId); return json(res, { ok: true }); }
+      if (action === "command") { return json(res, { text: await this.activity.command(String(data.groupId), String(data.userId), String(data.line)) }); }
+      if (action === "abandon") {
+        const key = data.triggerId ? `trigger:${data.triggerId}` : `observation:${data.observationId}`;
+        const preparation = this.preparing.get(key);
+        if (preparation) { preparation.controller.abort(new Error("Bot 已放弃提交")); await preparation.done; }
+        for (const [id, run] of this.runs) {
+          if (run.submissionKey === key && !run.delivered) {
+            run.controller.abort(new Error("Bot 没有接收到运行 ID")); await run.task;
+            await this.finishDelivery(id, true);
+          }
+        }
+        this.activity.abandon(Number(data.observationId), "Bot 未能提交群聊消息");
+        return json(res, { ok: true });
+      }
+      if (action === "finished") {
+        await this.finishDelivery(data.runId, data.failed === true);
+        return json(res, { ok: true });
+      }
+      return json(res, { error: "Not found" }, 404);
+    }
     if (url.pathname === "/v1/sessions/reset" && req.method === "POST") {
       const data = JSON.parse((await body(req)).toString());
-      await this.agent.reset(chatSessionKey(data.session_id));
+      if (epoch !== this.botEpoch) { return json(res, { error: "Bot 进程已更换" }, 409); }
+      const key = chatSessionKey(data.session_id);
+      await this.agent.reset(key);
+      if (key.startsWith("chat:group:")) { this.activity?.reset(key.split(":")[2]); }
       return json(res, { ok: true });
     }
     if (
@@ -74,11 +128,41 @@ export class Gateway {
       return json(res, { error: "Not found" }, 404);
     const c = this.config();
     if (url.pathname === "/v1/runs" && req.method === "POST") {
-      if (this.runs.size >= 500)
-        return json(res, { error: "运行队列已满" }, 429);
+      let releasePreparation: (() => void) | undefined;
+      try {
       const data = JSON.parse((await body(req)).toString());
+      if (epoch !== this.botEpoch) { return json(res, { error: "Bot 进程已更换" }, 409); }
+      if (this.runs.size >= 500) {
+        this.activity?.abandon(Number(data.context?.observationId), "运行队列已满");
+        return json(res, { error: "运行队列已满" }, 429);
+      }
       const sessionKey = chatSessionKey(data.session_id);
       const context = chatRunContext(sessionKey, data.context);
+      if (this.activity && context.route?.type === "user" && [...c.modules.chat.blockedUsers, ...c.activity.botUsers].includes(Number(context.route.userId))) { return json(res, { error: "此用户在 AI 忽略名单中" }, 403); }
+      let input = data.input;
+      let groupId: string;
+      let triggerId: string;
+      let submissionKey: string;
+      if (this.activity && context.route?.type === "group") {
+        groupId = context.route.groupId;
+        triggerId = data.context?.triggerId;
+        submissionKey = triggerId ? `trigger:${triggerId}` : `observation:${data.context?.observationId}`;
+        if (this.preparing.has(submissionKey)) { return json(res, { error: "消息正在准备提交" }, 409); }
+        const preparation = new AbortController();
+        let finish: () => void;
+        const done = new Promise<void>(resolve => { finish = resolve; });
+        this.preparing.set(submissionKey, { controller: preparation, done });
+        releasePreparation = () => { this.preparing.delete(submissionKey); finish(); };
+        const submission = await this.activity.submission(groupId, Number(data.context?.observationId || 0), triggerId, AbortSignal.any([preparation.signal, this.shutdown.signal]));
+        input = submission.input; context.submission = submission.submission;
+        context.route.userId = submission.actorId;
+        if (submission.source === "idle") {
+          context.route.admin = false;
+        } else {
+          const c = this.config();
+          context.route.admin = [...c.modules.chat.admins, ...c.modules.management.operators].includes(Number(submission.actorId));
+        }
+      }
       const id = randomUUID(),
         controller = new AbortController();
       const run: Run = {
@@ -88,9 +172,12 @@ export class Gateway {
         done: false,
         controller,
         approvalQueue: Promise.resolve(),
+        groupId, triggerId, submissionKey, batchId: context.submission?.batchId,
       };
       this.runs.set(id, run);
+      if (groupId) { this.activity.delivery(id, groupId, triggerId, context.submission?.batchId); }
       const emit = (event, payload) => {
+        if (event === "run.started") { run.execution = Promise.resolve().then(() => this.agent.whenCurrentSettled?.(sessionKey)); }
         const item = {
           event,
           run_id: id,
@@ -104,9 +191,9 @@ export class Gateway {
       json(res, { run_id: id, status: "queued" }, 202);
       run.task = this.agent
         .run(
-          data.input,
+          input,
           "chat",
-          data.conversation_history || [],
+          groupId ? [] : data.conversation_history || [],
           controller.signal,
           emit,
           data.instructions || "",
@@ -118,12 +205,13 @@ export class Gateway {
         )
         .then(
           (output) => emit("run.completed", { output }),
-          (e) => emit("run.failed", { error: e.message }),
+          (e) => { run.failed = true; emit("run.failed", { error: e.message }); },
         )
         .finally(() => {
           run.done = true;
         });
       return;
+      } finally { releasePreparation?.(); }
     }
     const [, , , id, action] = url.pathname.split("/");
     const run = this.runs.get(id);
@@ -212,6 +300,47 @@ export class Gateway {
       this.server ? this.server.close(() => resolve()) : resolve(),
     );
     await Promise.allSettled([...this.runs.values()].map((r) => r.task));
+    await Promise.allSettled([...this.runs.values()].map(run => run.execution));
     await Promise.allSettled(this.background);
+    await Promise.allSettled([...this.runs.values()].map(run => run.finishing));
+  }
+  /** 只有 SQLite 收尾成功才确认投递完成，并发通知共用同一个处理过程。 */
+  finishDelivery(id: string, failed = false): Promise<void> {
+    const run = this.runs.get(id);
+    if (!run?.groupId || run.delivered) { return Promise.resolve(); }
+    run.finishRequested = true; run.finishFailed ||= failed || run.failed;
+    if (!run.finishing) {
+      if (!run.done) { run.finishFailed = true; run.controller.abort(new Error("回复通道提前结束，取消未完成的原生任务")); }
+      run.finishing = (async () => {
+        await run.task;
+        await run.execution;
+        await this.activity.finished(id, run.batchId, run.finishFailed, run.triggerId);
+        run.delivered = true;
+      })().finally(() => { run.finishing = undefined; });
+    }
+    return run.finishing;
+  }
+  botDisconnected(): Promise<void> {
+    if (!this.disconnecting) {
+      this.disconnecting = this.disconnectBot().finally(() => { this.disconnecting = undefined; });
+    }
+    return this.disconnecting;
+  }
+  private async disconnectBot() {
+    this.botEpoch = randomUUID();
+    const preparations = [...this.preparing.values()];
+    for (const preparation of preparations) { preparation.controller.abort(new Error("Bot 连接已断开")); }
+    await Promise.allSettled(preparations.map(preparation => preparation.done));
+    for (const run of this.runs.values()) {
+      if (!run.delivered) { run.controller.abort(new Error("Bot 连接已断开")); }
+    }
+    for (const [id, run] of this.runs) {
+      if (run.delivered) { continue; }
+      await run.task;
+      await run.execution;
+      if (run.groupId) { await this.finishDelivery(id, true).catch(this.onError); }
+      else { run.delivered = true; }
+    }
+    this.activity?.disconnected();
   }
 }

@@ -3,6 +3,7 @@ import { readFile, mkdir, writeFile, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { activityAdapter } from "./activity-adapter.mjs";
 const require = createRequire(import.meta.url);
 const tsdownCli = path.join(
   path.dirname(require.resolve("tsdown/package.json")),
@@ -354,6 +355,7 @@ await build({
 `,
             );
           }
+          contents = activityAdapter(contents, file, vendor);
           return { contents, loader: "ts" };
         });
       },

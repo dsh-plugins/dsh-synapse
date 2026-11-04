@@ -10,6 +10,7 @@ import { SkillsPanel } from "./skills.js";
 import { McpPanel } from "./mcp.js";
 import { MemoryImportPanel } from "./memory.js";
 import { ReviewsPanel } from "./reviews.js";
+import { ActivityPanel } from "./activity.js";
 
 export const inject = ["dshLoaderUi"];
 
@@ -48,7 +49,7 @@ export function apply(ctx: {
     title: "编辑聊天与通知功能",
     component: ModulesEditor,
   });
-  for (const [id, component] of [["skills", SkillsPanel], ["mcp", McpPanel], ["memory-import", MemoryImportPanel], ["reviews", ReviewsPanel]] as const) {
+  for (const [id, component] of [["skills", SkillsPanel], ["mcp", McpPanel], ["memory-import", MemoryImportPanel], ["reviews", ReviewsPanel], ["activity", ActivityPanel]] as const) {
     ctx.dshLoaderUi.config.registerPanel(ctx, { id, configId: "dsh-synapse", component });
   }
   for (const [field, label] of [["memoryPrompt", "记忆"], ["skillPrompt", "Skill"]] as const) {

@@ -11,16 +11,31 @@ import { McpManager } from "./mcp.js";
 import { Agent } from "./agent.js";
 import { Gateway } from "./gateway.js";
 import { Bot } from "./bot.js";
+import { ChatActivity, type ActivityWriter } from "./chat-activity.js";
+import { ChatState } from "./chat-state.js";
+import { ChatImages } from "./chat-images.js";
+import { AsyncWordCloud } from "./word-cloud.js";
 import { Reviews } from "./github.js";
 import { json, body, browserAuthorized } from "./http.js";
 import type { SynapseContext, SynapseConfig, ErrorSink } from "./types.js";
 export const name = "@dsh-plugin/dsh-synapse";
 export const inject = ["dshLoader"];
 export { template };
+/** 主动策略与 AI 忽略名单可以原位更新，其他功能沿用完整重配流程。 */
+export function activityOnlyChange(previous: SynapseConfig, next: SynapseConfig): boolean {
+  const stable = (value: SynapseConfig) => {
+    const copy = structuredClone(value);
+    delete copy.activity;
+    delete copy.modules.chat.blockedUsers;
+    return JSON.stringify(copy);
+  };
+  return stable(previous) === stable(next);
+}
 export async function createService(
   ctx: SynapseContext,
   c: SynapseConfig,
   onError: ErrorSink,
+  writer?: ActivityWriter,
 ) {
   validateConfig(c);
   const paths = pathsFor(ctx);
@@ -42,10 +57,16 @@ export async function createService(
       memory,
       skills,
       mcp,
-    }),
-    gateway = new Gateway(agent, config, onError);
+    });
+  const state = new ChatState(path.join(paths.data, "chat-state.sqlite"));
+  const images = new ChatImages(paths, state, config);
+  const activity = new ChatActivity({ state, images, cloud: new AsyncWordCloud(path.join(paths.data, "chat-state.sqlite")), config, onError,
+    busy: groupId => agent.busy(`chat:group:${groupId}`), writer });
+  const gateway = new Gateway(agent, config, onError, activity);
   const bot = new Bot(paths, config, gateway, onError),
     reviews = new Reviews(memory.db, agent, config, bot, onError);
+  activity.activate = event => bot.activate(event);
+  activity.available = () => bot.state === "running";
   const close = async () => {
     const results = await Promise.allSettled([
       reviews.close(),
@@ -57,11 +78,14 @@ export async function createService(
     ]);
     for (const result of results)
       if (result.status === "rejected") onError(result.reason);
+    await activity.close();
     memory.close();
   };
   try {
+    await activity.recover((sessionId, messageId, batchId) => agent.harness.hasInput(sessionId, messageId, batchId));
     await gateway.start();
     await bot.start();
+    activity.start();
     void reviews.drain();
     if (c.enabled && c.ragEnabled)
       void inference.embed("初始化记忆模型").catch(onError);
@@ -80,6 +104,13 @@ export async function createService(
     gateway,
     bot,
     reviews,
+    activity,
+    async updateActivity(value: SynapseConfig, source: string, revision?: number) {
+      validateConfig(value);
+      const previous = c; c = value;
+      bot.updateActivity();
+      await activity.configure(previous, source, revision);
+    },
     close,
   };
 }
@@ -98,21 +129,32 @@ export async function apply(ctx: SynapseContext) {
     queue = result.catch(onError);
     return result;
   };
-  const reconfigure = (value) =>
+  const reconfigure = (value, revision?: number) =>
     enqueue(async () => {
       if (disposed) return;
+      if (revision !== undefined && handle.get().revision !== revision) { return; }
       validateConfig(value);
       pathsFor(ctx);
+      if (service && activityOnlyChange(service.config(), value)) {
+        if (JSON.stringify(service.config()) !== JSON.stringify(value)) { await service.updateActivity(value, "设置页", revision); }
+        return;
+      }
       if (service) {
         const old = service;
         service = null;
         await old.close();
       }
-      service = await createService(ctx, value, onError);
+      service = await createService(ctx, value, onError, (activity, source, previous) => enqueue(async () => {
+        const current = handle.get();
+        if (JSON.stringify(current.value.activity) !== JSON.stringify(previous)) { throw new Error("群聊策略已变更，请重新执行命令"); }
+        validateConfig({ ...current.value, activity });
+        const saved = await handle.update({ activity }, current.revision);
+        if (service) { await service.updateActivity(saved.value, source, saved.revision); }
+      }));
       lastError = "";
     });
   const off = handle.watch(
-    ({ value }) => void reconfigure(value).catch(() => {}),
+    ({ value, revision }) => void reconfigure(value, revision).catch(() => {}),
   );
   registerOperations(
     handle,

@@ -2,9 +2,12 @@
 export class SessionQueue {
   private queues = new Map<
     string,
-    { tail: Promise<void>; jobs: Set<AbortController> }
+    { tail: Promise<void>; jobs: Set<AbortController>; active?: Promise<void> }
   >();
   private closed = false;
+
+  busy(key: string): boolean { return Boolean(this.queues.get(key)?.jobs.size); }
+  whenCurrentSettled(key: string): Promise<void> { return this.queues.get(key)?.active ?? Promise.resolve(); }
 
   run<T>(
     key: string,
@@ -12,7 +15,7 @@ export class SessionQueue {
     caller?: AbortSignal,
   ): Promise<T> {
     if (this.closed) return Promise.reject(new Error("会话队列已关闭"));
-    const queue = this.queues.get(key) ?? {
+    const queue: { tail: Promise<void>; jobs: Set<AbortController>; active?: Promise<void> } = this.queues.get(key) ?? {
       tail: Promise.resolve(),
       jobs: new Set<AbortController>(),
     };
@@ -25,7 +28,10 @@ export class SessionQueue {
     ]);
     const task = queue.tail.then(() => {
       signal.throwIfAborted();
-      return work(signal);
+      const executing = work(signal);
+      const active = executing.then(() => {}, () => {});
+      queue.active = active;
+      return executing.finally(() => { if (queue.active === active) { queue.active = undefined; } });
     });
     queue.tail = task
       .then(

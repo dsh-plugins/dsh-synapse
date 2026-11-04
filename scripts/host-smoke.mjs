@@ -16,6 +16,9 @@ import { SkillStore } from "../lib/host/files.js";
 import { chatTools } from "../lib/host/chat-tools.js";
 import { Inference } from "../lib/host/runtime.js";
 import { SessionBindings } from "../lib/host/session-bindings.js";
+import { ChatState } from "../lib/host/chat-state.js";
+import { ChatImages } from "../lib/host/chat-images.js";
+import { ChatActivity } from "../lib/host/chat-activity.js";
 if (!process.argv[2])
   throw new Error(
     "Usage: node scripts/host-smoke.mjs <installed DSH package.json>",
@@ -61,6 +64,7 @@ class FixtureLlm extends Service {
       return this.stream(request);
     } };
   }
+  async resolveModelInfo() { return { inputModalities: ["text", "image"] }; }
   async *stream(request) {
     requests.push(request);
     if (blockNext) {
@@ -108,22 +112,28 @@ class FixtureFs extends Service {
   constructor(ctx) { super(ctx, "fs"); }
   async resolve(input, { cwd = data, signal } = {}) {
     signal?.throwIfAborted();
-    return path.resolve(cwd, input);
+    const absolute = path.resolve(cwd, input);
+    return { displayPath: absolute };
   }
   async stat(target, signal) {
     signal?.throwIfAborted();
     try {
-      const info = await fsStat(target);
+      const info = await fsStat(target.displayPath ?? target);
       return { type: info.isDirectory() ? "directory" : "file", size: info.size, version: `${info.mtimeMs}:${info.size}` };
     } catch (error) {
       if (error.code === "ENOENT") { return undefined; }
       throw error;
     }
   }
-  processPath(target) { return target; }
+  processPath(target) { return target.displayPath ?? target; }
   async *streamText(target, signal) {
     signal?.throwIfAborted();
-    yield await readFile(target, "utf8");
+    yield await readFile(target.displayPath ?? target, "utf8");
+  }
+  async readBytes(target, signal, limit) {
+    const bytes = await readFile(target.displayPath ?? target, { signal });
+    if (bytes.length > limit) { throw new Error("读图超过字节限制"); }
+    return bytes;
   }
 }
 await ctx.plugin(FixtureFs);
@@ -543,8 +553,40 @@ try {
     const workspace = await ctx.workspaceRegistry.resolveByPath(path.join(data, "workspace", "review"));
     assert(workspace.sessionIds.includes(review.id));
   }
+  {
+    await ctx.plugin(await load("dsh-tool-fs"), { read: false, write: false, edit: false, readImage: true });
+    const imagePaths = { ...paths, data: path.join(data, "data", "dsh-synapse") };
+    await mkdir(imagePaths.data, { recursive: true });
+    const state = new ChatState(path.join(imagePaths.data, "chat-state.sqlite"));
+    const activityConfig = { ...config, enabled: true, modules: { ...config.modules, chat: { ...config.modules.chat, groups: [987] } } };
+    const activity = new ChatActivity({ state, images: new ChatImages(imagePaths, state, () => activityConfig), config: () => activityConfig,
+      cloud: { message: async () => ({ boost: 0, words: [] }), removeUsers: async () => {}, close: async () => {} } });
+    try {
+      await activity.recover((...args) => harness.hasInput(...args)); activity.identity("42");
+      const original = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+      const event = { groupId: "987", messageId: "1", userId: "1", selfId: "42", name: "读图验证", time: Date.now(), mentioned: false, message: [{ type: "text", data: { text: "此前普通聊天背景" } }] };
+      await activity.observe(event);
+      const observed = await activity.observe({ ...event, messageId: "2", mentioned: true, message: [{ type: "image", data: { file: "base64://" + original.toString("base64") } }] });
+      const input = await activity.submission("987", observed.seq);
+      const file = state.message(observed.seq).attachments[0].path;
+      assert.match(file, /[a-f0-9]{64}\.png$/);
+      const start = requests.length;
+      nativeCalls.push({ name: "read_image", args: { file_path: file } });
+      await harness.run("按需使用标准读图工具", input.input, [], [], undefined, undefined, undefined, "chat:group:987", "chat", undefined, [], input.submission);
+      assert.equal(state.messages("987").length, 0);
+      const batch = state.batch(input.submission.batchId);
+      assert.equal(await harness.hasInput(batch.sessionId, batch.messageId, batch.id), true);
+      const imageRequests = requests.slice(start);
+      assert(!imageRequests[0].messages.flatMap(message => message.content).some(part => part.type === "image"));
+      const toolImage = imageRequests.at(-1).messages.flatMap(message => message.content).find(part => part.type === "image");
+      assert(toolImage, JSON.stringify(imageRequests.at(-1).messages.slice(-3)));
+      assert.equal(toolImage.attachment.width, 1); assert.equal(toolImage.attachment.height, 1);
+      assert((await ctx.attachments.readImage(toolImage.attachment)).data.length > 0);
+      await activity.finished("native-smoke", batch.id);
+    } finally { await activity.close(); }
+  }
   console.log(
-    "真实 DSH 验证通过：标准预设与宿主工具、规则文件注入、通道工作区、图片附件、会话标题、权限、原生 RAG/Skill 子代理与查询工具、JSONL 恢复、取消与重置" + (hasWorkspaceRegistry ? "、归档后新建与工作区列表登记。" : "。"),
+    "真实 DSH 验证通过：标准预设与宿主工具、规则文件注入、通道工作区、图片附件、会话标题、权限、原生 RAG/Skill 子代理与查询工具、JSONL 恢复、取消与重置、群聊批次持久化确认与缓存图片按需 read_image" + (hasWorkspaceRegistry ? "、归档后新建与工作区列表登记。" : "。"),
   );
 } finally {
   await harness.close();
