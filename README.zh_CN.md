@@ -63,6 +63,7 @@
 
 - **人设与补充规则**：在 `<profile>/` 或 `$DSH_HOME/` 下放置 `SOUL.md` 可自定义聊天人设，放置 `AGENTS.md` 可自定义审查规则（`<profile>/` 优先），保存后对下一次请求生效。
 - **记忆与 Skill**：聊天与审查记忆相互独立。可在 **Hermes 记忆导入** 中粘贴 Markdown 批量导入，在 **记忆检索** 中搜索已有记忆，或在 **Skill 管理** 中预览、新增和编辑 Skill。
+- **嵌入与重排模型**：在 **RAG / Skill 自总结** 中分别选择本地或在线运行。在线模式填写服务 Base URL、API Key 与模型名称；SiliconFlow 地址为 `https://api.siliconflow.cn/v1`。重排需同时开启 **启用重排**。嵌入输出维度默认 `0`，由模型决定；模型切换后会重建向量索引并保留记忆正文。在线服务会接收记忆文本和检索词，并可能产生调用费用。
 - **内置工具与 MCP**：聊天模型可直接查询 GitHub Issue/PR、B 站视频、Minecraft 版本与服务器状态、中文 Minecraft 维基、Modrinth 模组版本及当前会话的 QQ 聊天记录，也可在核对发言者权限后调用 OneBot API 或执行群管理操作。在 **MCP 管理** 中可配置并测试 `stdio`、`Streamable HTTP` 或 `SSE` 服务，勾选允许聊天模型自动调用的工具。
 
 ## GitHub 审查接入
@@ -83,7 +84,7 @@
 
 **第一次打开记忆功能时为什么会卡住或报错？**
 
-首次启用需要下载本地嵌入与重排模型，直连失败时会自动通过 `hf-mirror.com` 重试。如需配置代理，请在启动 DSH 前设置 `HTTPS_PROXY` 环境变量（Node.js 24 可配合 `NODE_USE_ENV_PROXY=1`）。
+首次使用本地嵌入或重排时需要下载对应模型，直连失败时会自动通过 `hf-mirror.com` 重试。如需配置代理，请在启动 DSH 前设置 `HTTPS_PROXY` 环境变量（Node.js 24 可配合 `NODE_USE_ENV_PROXY=1`）。也可在 **RAG / Skill 自总结** 中选择在线模型并填写服务配置。
 
 **Windows 发送图片时出现 `sharp` 的 `ERR_DLOPEN_FAILED` 怎么办？**
 

@@ -42,6 +42,14 @@ export interface McpSpec {
   headers: { name: string; value: string }[];
   allowedTools: string[];
 }
+/** 记忆模型可独立选择本地推理或在线服务，dimensions 只用于嵌入请求。 */
+export interface MemoryModelConfig {
+  source: "local" | "online";
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  dimensions?: number;
+}
 export interface SynapseConfig {
   activity: ActivityConfig;
   enabled: boolean;
@@ -66,6 +74,8 @@ export interface SynapseConfig {
   publishReviews: boolean;
   maxDiffChars: number;
   ragEnabled: boolean;
+  embeddingModel: MemoryModelConfig;
+  rerankModel: MemoryModelConfig;
   recallK: number;
   memoryK: number;
   reranker: boolean;
@@ -160,9 +170,11 @@ export interface MemoryRow extends MemoryItem {
   created: string;
   score?: number;
 }
+/** 记忆层的模型能力，允许批量生成文档向量并传递调用方取消信号。 */
 export interface Embeddings {
-  embed(text: string, query?: boolean): Promise<number[]>;
-  rerank(query: string, documents: string[]): Promise<number[]>;
+  embed(text: string, query?: boolean, signal?: AbortSignal): Promise<number[]>;
+  embedMany?(texts: string[], signal?: AbortSignal): Promise<number[][]>;
+  rerank(query: string, documents: string[], signal?: AbortSignal): Promise<number[]>;
 }
 export interface Skill {
   name: string;

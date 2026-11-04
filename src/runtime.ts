@@ -2,6 +2,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { fork, spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import type { ConfigSource } from "./types.js";
+import { onlineEmbed, onlineEmbedMany, onlineRerank } from "./online-models.js";
+import { abortable } from "./abort.js";
 const VERSION = "3.8.1";
 export async function installRuntime(root: string, signal?: AbortSignal) {
   await mkdir(root, { recursive: true });
@@ -95,7 +98,7 @@ export class Inference {
   private closing: Promise<void>;
   installer = new AbortController();
 
-  constructor(data: string) {
+  constructor(data: string, private config?: ConfigSource) {
     this.data = data;
     this.pending = new Map();
     this.counter = 0;
@@ -188,16 +191,34 @@ export class Inference {
       });
     });
   }
-  embed(text, query = false) {
-    return this.call("embed", { text, query });
+  private requestSignal(signal?: AbortSignal): AbortSignal {
+    if (this.closed) { throw new Error("模型推理已关闭"); }
+    const combined = AbortSignal.any([this.installer.signal, ...(signal ? [signal] : [])]);
+    combined.throwIfAborted();
+    return combined;
   }
-  rerank(query, documents) {
-    return this.call("rerank", { query, documents });
+  async embed(text: string, query = false, signal?: AbortSignal) {
+    const combined = this.requestSignal(signal);
+    const model = this.config?.().embeddingModel;
+    return model?.source === "online" ? onlineEmbed(model, text, combined) : abortable(this.call("embed", { text, query }), combined);
+  }
+  async embedMany(texts: string[], signal?: AbortSignal) {
+    const combined = this.requestSignal(signal);
+    const model = this.config?.().embeddingModel;
+    if (model?.source === "online") { return onlineEmbedMany(model, texts, combined); }
+    const vectors: number[][] = [];
+    for (const text of texts) { vectors.push(await this.embed(text, false, combined)); }
+    return vectors;
+  }
+  async rerank(query: string, documents: string[], signal?: AbortSignal) {
+    const combined = this.requestSignal(signal);
+    const model = this.config?.().rerankModel;
+    return model?.source === "online" ? onlineRerank(model, query, documents, combined) : abortable(this.call("rerank", { query, documents }), combined);
   }
   close() {
     if (!this.closing) {
       this.closed = true;
-      this.installer.abort();
+      this.installer.abort(new Error("模型推理已关闭"));
       this.fail(new Error("推理进程已关闭"));
       this.closing = (async () => {
         // 启动错误由原请求返回，关闭时等待安装任务结束再回收子进程。

@@ -3,6 +3,7 @@ import type { ConfigField } from "@dsh-plugin/dsh-loader/config";
 import type { SynapseConfig } from "./types.js";
 import { panels } from "./operation-panels.js";
 import { activityField, validateActivity } from "./activity-config.js";
+import { validateMemoryModel } from "./online-models.js";
 import {
   text,
   flag,
@@ -23,6 +24,17 @@ const pairs = (key: string, label: string) =>
       text("value", "值", "", "password"),
     ]),
   );
+const memoryModel = (key: string, label: string, model: string, embedding = false): ConfigField => {
+  const online = { path: [key, "source"], equals: "online" };
+  return object(key, label, [
+    select("source", "运行方式", [["local", embedding ? "本地 bge-small-zh-v1.5（CPU）" : "本地 bge-reranker-base（CPU）"], ["online", "在线服务"]]),
+    { ...text("baseUrl", "服务 Base URL", "https://api.siliconflow.cn/v1"), visibleWhen: online },
+    { ...text("apiKey", "API Key", "", "password"), visibleWhen: online },
+    { ...text("model", "模型名称", model), visibleWhen: online },
+    ...(embedding ? [{ ...num("dimensions", "输出维度（0 使用模型默认值）", 0, 0, 8192), visibleWhen: online,
+      description: "仅在服务支持时指定；SiliconFlow 的 Qwen3 系列支持自定义维度。" }] : []),
+  ], { collapsible: true, defaultCollapsed: true });
+};
 export const template = defineConfig({
   id: "dsh-synapse",
   packageName: "@dsh-plugin/dsh-synapse",
@@ -94,10 +106,13 @@ export const template = defineConfig({
       num("maxDiffChars", "最大差异字符数", 80000, 1000, 500000),
     ]),
     { ...collapsibleGroup("RAG / Skill 自总结", [
-      flag("ragEnabled", "启用本地混合记忆", true),
+      flag("ragEnabled", "启用混合记忆", true),
+      { ...memoryModel("embeddingModel", "嵌入模型", "BAAI/bge-m3", true),
+        description: "在线模式会将记忆文本和检索词发送至所选服务。切换嵌入模型后，下次检索或写入会重建已有记忆的向量，可能产生服务费用。" },
       num("recallK", "初步召回数量", 50, 1, 200),
       num("memoryK", "上下文记忆条数", 8, 1, 50),
-      flag("reranker", "启用本地 bge-reranker-base"),
+      flag("reranker", "启用重排"),
+      memoryModel("rerankModel", "重排模型", "BAAI/bge-reranker-v2-m3"),
       flag("learnMemory", "总结重要事项到长期记忆", true),
       {
         ...text("memoryPrompt", "主动记录记忆的提示词", "在对话或审查中留意值得长期保留的信息，如已核实的事实、用户偏好、长期约束和关键决定。发现此类信息时，先调用 synapse_memory_search 查重，再调用 synapse_memory_save 写入当前通道的记忆库，不必等用户主动要求。记忆内容应简明具体，需要时注明适用范围；切勿记录密钥、凭据、未经核实的推测或临时状态。仅在工具返回写入成功后才告知用户已保存；日常闲聊不必记录。", "textarea"),
@@ -128,6 +143,8 @@ export const template = defineConfig({
 export function validateConfig(c: SynapseConfig) {
   validateValues(template.fields, c as any);
   validateActivity(c.activity);
+  validateMemoryModel(c.embeddingModel);
+  validateMemoryModel(c.rerankModel);
   const unique = (values: string[], label: string) => {
     if (new Set(values).size !== values.length)
       throw new Error(`${label}不能重复`);

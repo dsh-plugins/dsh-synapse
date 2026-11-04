@@ -28,10 +28,12 @@
 
 补充规则通过宿主原生的 `renderAgentInstructions` 渲染为带来源路径的用户角色上下文消息，与 `standard` 预设的系统提示词并存。插件按内容去重，仅在文件新增、修改或删除后的下一次请求中追加更新，重启恢复会话时也会识别已注入的内容。
 
-## 本地混合记忆与子代理总结
+## 混合记忆与子代理总结
 
 - **独立推理进程**：向量嵌入（`Xenova/bge-small-zh-v1.5`）与重排（`Xenova/bge-reranker-base`）运行在通过 `child_process.fork` 启动的独立进程中，避免在 Windows 下与宿主的图片处理组件产生 `sharp` 原生动态库冲突。模型下载直连 Hugging Face 失败时自动回退至 `hf-mirror.com`。
-- **混合检索**：记忆存储在 `<profile>/data/dsh-synapse/memory.sqlite`，结合 `sqlite-vec` 向量检索与 `FTS5` 分词检索（RRF 融合），可选经过本地重排模型排序。聊天（`chat`）与审查（`review`）通道的记忆严格隔离。
+- **在线推理**：`embeddingModel` 与 `rerankModel` 分别选择 `local` 或 `online`，默认本地。在线模式配置 Base URL、API Key 与模型名称，默认服务地址为 `https://api.siliconflow.cn/v1`；嵌入默认 `BAAI/bge-m3`，重排默认 `BAAI/bge-reranker-v2-m3`。请求遵循 SiliconFlow 的[嵌入接口](https://api-docs.siliconflow.cn/docs/api/embeddings-post)和[重排接口](https://api-docs.siliconflow.cn/docs/api/rerank-post)，通过 Bearer 鉴权，支持取消与 60 秒超时，响应限制为 2 MB。嵌入使用浮点回执，批量请求按 `index` 恢复顺序；重排按文档 `index` 还原分数。在线路径按原文发送文本，只在选用本地模型时启动本地推理进程。
+- **向量索引迁移**：`embeddingModel.dimensions=0` 时采用模型默认维度；服务支持时可指定输出维度（SiliconFlow 的 Qwen3 系列支持此参数）。`sqlite-vec` 支持 1–8192 维向量。索引记录嵌入服务、模型与维度标识；切换模型或维度时按 16 条一批重新计算已有记忆向量，通过宿主日志显示进度，再在单个事务中替换向量表及模型标识。正文、ID、时间、去重和全文索引保留；失败或取消时保留原向量表。嵌入写入与检索串行执行，密钥轮换或单独更换重排模型不会重建向量索引。
+- **混合检索**：记忆存储在 `<profile>/data/dsh-synapse/memory.sqlite`，结合 `sqlite-vec` 向量检索与 `FTS5` 分词检索（RRF 融合），可选经过所选重排模型排序。聊天（`chat`）与审查（`review`）通道的记忆严格隔离。在线模式会向所配置的服务发送记忆文本及检索词，密钥通过 loader 的密码字段管理，错误日志只返回状态和本地校验信息。
 - **原生子代理委派**：主模型不直接暴露记忆或 Skill 写入工具，而是通过 `synapse_memory_summarize` 与 `synapse_skill_summarize` 调用宿主 `subagents` 服务（`spawn` 提供方）启动子会话。子会话绑定父会话 ID 并继承当前通道的模型路由，仅挂载对应通道的检索、读取与保存工具（`synapse_memory_*` 或 `synapse_skill_*`）。
 
 ## 聊天原生工具与 OneBot 接口

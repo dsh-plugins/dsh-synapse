@@ -42,12 +42,13 @@ export async function createService(
   await safePath(paths.profile, "data", "dsh-synapse");
   await mkdir(paths.data, { recursive: true });
   const config = () => c,
-    inference = new Inference(paths.data),
+    inference = new Inference(paths.data, config),
     skills = new SkillStore(paths);
   const memory = new Memory(
       path.join(paths.data, "memory.sqlite"),
       inference,
       config,
+      (completed, total) => ctx.logger?.info?.(`[synapse] 记忆向量重建：${completed}/${total}`),
     ),
     mcp = new McpManager(config);
   const agent = new Agent({
