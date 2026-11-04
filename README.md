@@ -71,6 +71,12 @@ AI 忽略名单只影响 AI 流程，命令、自动卡片与 Discord 转发保�
 
 “Skill 管理”通过表格列出名称与来源，点击“编辑”先预览 Markdown，再通过右上角“编辑”和“保存”修改内容。支持新增和删除 profile 条目；保存继承的 Home Skill 会创建 profile 覆盖，保留原文件。模型主动委派原生 sub-agent 总结 Skill 与重要记忆，详见[中文文档](README.zh_CN.md#人设记忆与-skill)。
 
+## OneBot 历史与通用调用
+
+聊天模型在群聊中获得 `synapse_get_group_msg_history`，在 QQ 私聊中获得 `synapse_get_friend_msg_history`，目标由当前会话绑定，默认读取 20 条，最多 100 条。NapCat 使用 `message_seq` / `reverseOrder`，SnowLuma 使用 `message_id` / `reverse_order`，省略时采用后端默认值。
+
+`synapse_onebot_api` 接受相对 `path` 与 JSON `params`，自动复用已配置地址、前缀和访问令牌，通过 POST 转发给 OneBot。通用工具向聊天模型开放，说明中注入可信发言者与管理员状态，要求模型自行核对调用权限。结果包含 HTTP 状态及原始回执，保留业务失败与异步状态；回执完整进入工具结果，最大 2 MB，支持取消和 15 秒超时。详见[完整说明](README.zh_CN.md#onebot-历史与通用调用)。
+
 ## MCP
 
 “MCP 管理”通过表格列出服务，点击新增或编辑后在弹窗设置 `stdio`、`Streamable HTTP` 或 `SSE`。点击“测试并获取工具”测试当前草稿，工具列表与参数 Schema 显示在弹窗底部，无需提前保存；右上角保存后生效。`stdio` 服务以当前系统用户权限运行。

@@ -219,7 +219,7 @@ export class Harness {
             parameters: tool.parameters,
             output: {
               schema: { type: "object", additionalProperties: true },
-              render: (_args, value) => [
+              render: (_args, value) => tool.render ? tool.render(value) : [
                 { type: "text", text: JSON.stringify(value).slice(0, 40000) },
               ],
             },

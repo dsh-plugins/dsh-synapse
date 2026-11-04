@@ -97,6 +97,16 @@ DSH 启用会话持久化时，重载后可以继续原来的对话；重载前�
 
 启用自动总结后，主模型可委派 Skill 子代理把已验证的经验整理为 Skill，供以后处理相似问题时参考。Skill 记录可复用的操作步骤，不直接作为脚本执行。“Skill 管理”以表格列出名称和来源，点击“编辑”先打开 Markdown 预览，再通过右上角“编辑”进入编辑模式，完成后点击右上角“保存”返回预览。也可新增 Skill，或在弹窗确认后删除当前 profile 条目；保存从主目录继承的条目会创建当前 profile 覆盖，主目录原文件保留。
 
+## OneBot 历史与通用调用
+
+聊天模型可以调用 `synapse_get_group_msg_history` 查询当前 QQ 群的历史（包括 Discord 桥接群），私聊中则提供 `synapse_get_friend_msg_history`。目标群号或好友 QQ 由宿主绑定；默认 20 条，`count` 支持 1–100。按后端选择分页参数：NapCat 使用 `message_seq` 和 `reverseOrder`，SnowLuma 使用 `message_id` 和 `reverse_order`，两组不能混用；省略时使用后端的最新历史及默认排序。消息序号使用字符串保留精度，消息 ID 支持负数。
+
+`synapse_onebot_api` 接受 `path` 和 `params`，例如 `{"path":"/get_group_info","params":{"group_id":123}}`。宿主使用已配置的 OneBot HTTP 地址、路径前缀与访问令牌，以 POST JSON 发送给 NapCat/SnowLuma；可带查询串，禁止通过 `path` 替换主机或协议。配置中的查询参数优先保留，鉴权令牌不放入工具说明或返回包装。
+
+通用工具向聊天模型开放。工具说明提供宿主确定的发言者 QQ、会话类型、群号及管理员状态，要求模型核对发言者的意图和权限后自行判断是否调用，尤其是发送消息、群管理、删除及跨会话查询。调用结果包含 `httpStatus` 和后端原始 JSON `receipt`，保留失败、异步接收、消息段和分页字段；模型需检查回执再说明结果。原始回执完整进入原生工具结果，超过 2 MB 时明确报错；请求支持取消，最长等待 15 秒。
+
+参数说明参见 [NapCat 扩展接口](https://napneko.pages.dev/develop/api/doc)与 [SnowLuma 历史接口](https://snowluma.github.io/zh/docs/api/extended/get_friend_msg_history)。
+
 ## MCP
 
 “MCP 管理”以表格显示服务名称、传输方式和启用状态。点击“新增 MCP”或行内“编辑”打开弹窗，选择 `stdio`、`Streamable HTTP` 或 `SSE`，填写启动参数或 URL、环境变量和请求头。点击“测试并获取工具”会测试当前草稿，工具与参数 Schema 显示在弹窗底部；测试不会先保存配置。右上角“保存”后生效，服务启动失败时也可通过此面板修复配置。`stdio` 服务以当前系统用户的权限运行。

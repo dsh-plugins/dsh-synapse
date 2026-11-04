@@ -178,6 +178,8 @@ export interface AvailableTool {
   parameters: Record<string, unknown>;
   /** parent 由宿主工具回调绑定，只供原生子代理委派使用，不接受模型覆盖。 */
   execute?: (args: Record<string, unknown>, signal: AbortSignal, parent?: any) => Promise<unknown>;
+  /** 原始 API 回执需要完整交给模型，避免默认文本摘要截断分页字段。 */
+  render?: (value: unknown) => { type: "text"; text: string }[];
 }
 export interface ChatMessage {
   role: string;

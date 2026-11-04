@@ -370,6 +370,11 @@ try {
       if (url.hostname === "ghapi.anvilcraft.dev") {
         return Response.json({ title: "宿主查询验证 Issue", body: "真实工具返回", html_url: "https://github.com/foo/bar/issues/114", state: "open" });
       }
+      if (url.hostname === "127.0.0.1") {
+        const params = JSON.parse(init.body);
+        if (url.pathname === "/get_group_msg_history") { assert.equal(params.group_id, 123); }
+        return Response.json({ status: "ok", retcode: 0, data: { messages: [{ raw_message: "OneBot 原生回执验证" }] }, echo: "receipt-echo" });
+      }
       assert.equal(url.hostname, "api.bilibili.com");
       return Response.json({ code: 0, data: { bvid: "BV1xx411c7mD", title: "宿主查询验证视频", owner: { name: "foo" } } });
     };
@@ -381,6 +386,13 @@ try {
     assert.equal(queries, 2);
     assert.match(JSON.stringify(requests.at(-1)), /宿主查询验证 Issue/);
     assert.match(JSON.stringify(requests.at(-1)), /宿主查询验证视频/);
+    nativeCalls.push(
+      { name: "synapse_get_group_msg_history", args: { count: 2 } },
+      { name: "synapse_onebot_api", args: { path: "/get_status", params: {} } },
+    );
+    await residentRun("读取当前群历史和通用接口", "调用 OneBot 工具", chatTools(() => config, paths, { type: "group", groupId: "123", userId: "1", name: "example", admin: false }));
+    assert.match(JSON.stringify(requests.at(-1)), /OneBot 原生回执验证/);
+    assert.match(JSON.stringify(requests.at(-1)), /receipt-echo/);
   } finally {
     globalThis.fetch = originalFetch;
     config.repositories = repositories;
