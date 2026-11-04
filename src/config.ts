@@ -70,8 +70,14 @@ export const template = defineConfig({
         description:
           "仅在新建会话时应用，已有会话保留原权限。自动审查需要宿主启用 @deepseek-ai/dsh-experimental-auto-review。",
       },
-      num("timeoutSec", "单次任务超时（秒）", 120, 5, 600),
-      num("maxToolRounds", "单次任务最大步骤数", 6, 1, 20),
+      {
+        ...num("timeoutSec", "单次任务超时（秒）", 120, -1, 600),
+        description: "-1 表示无限制；0–600 表示本轮模型执行和工具调用的总时限（秒），0 表示立即超时。",
+      },
+      {
+        ...num("maxToolRounds", "单次任务最大步骤数", 6, -1, 20),
+        description: "-1 表示无限制；0–20 表示允许执行的步骤数，0 表示禁止执行步骤。",
+      },
     ]),
     collapsibleGroup("GitHub Webhook", [
       flag("githubEnabled", "启用 Webhook 审查"),

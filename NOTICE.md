@@ -15,6 +15,8 @@ serializes incoming message preparation, and forwards context resets to DSH. All
 remain included. Hermes bridge code includes upstream's attribution to Amorter
 and qq-hermes-bridge (MIT); those notices are preserved in source.
 
+`src/qq-send-queue.ts` 实现按 QQ 会话合并、全局轮流限速及超长消息转聊天记录。`scripts/build.mjs` 将其接入上游公开发送方法，并让逐句回复先提交完整批次，发送完成后再结束本轮；私聊可撤回回执保持独立。上游源文件保留原样。
+
 Modified distribution: DSH Synapse contributors, 2026, AGPL-3.0-only.
 When offering this modified program over a network, offer recipients the
 corresponding source under AGPL section 13. Ship this source alongside builds.

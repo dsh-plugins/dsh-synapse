@@ -75,7 +75,7 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     groups: [123],
     reactionEnabled: false,
     progressAsImage: false,
-    replyPerSentence: false,
+    replyPerSentence: true,
   });
   const requests = [];
   const http = createServer(async (req, res) => {
@@ -119,7 +119,11 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     return originalFetch(input, init);
   });
   const host = hostFixture(async ({ message, tools, signal }) => {
-    if (message.content[0].text.includes("first group message")) {
+    const input = message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
+    if (input.includes("merge queued sentences")) {
+      return "甲".repeat(190) + "。\n" + "乙".repeat(190) + "。";
+    }
+    if (input.includes("first group message")) {
       const version = await tools.find((tool) => tool.name === "synapse_minecraft_version").execute({}, { signal });
       return `hello ${version.release}`;
     }
@@ -164,11 +168,11 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
       }),
     );
     await waitFor(
-      () => requests.some((r) => r.url === "/send_group_msg"),
+      () => requests.some((r) => ["/send_group_msg", "/send_group_forward_msg"].includes(r.url) && /mcv|help|github/.test(JSON.stringify(r.body))),
       12000,
     );
     assert.match(
-      JSON.stringify(requests.find((r) => r.url === "/send_group_msg").body),
+      JSON.stringify(requests.find((r) => ["/send_group_msg", "/send_group_forward_msg"].includes(r.url) && /mcv|help|github/.test(JSON.stringify(r.body))).body),
       /mcv|help|github/,
     );
     socket.send(
@@ -195,6 +199,16 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     );
     assert.equal(received[0].key, "chat:user:1");
     assert.equal(received[0].context.title, "【私聊】tester（1）");
+    socket.send(JSON.stringify({
+      post_type: "message", message_type: "group", group_id: 123, user_id: 1,
+      self_id: 42, message_id: 99, raw_message: "merge queued sentences",
+      message: [{ type: "text", data: { text: "merge queued sentences" } }],
+      sender: { user_id: 1, nickname: "tester", role: "owner" },
+    }));
+    await waitFor(() => requests.some(r => r.url === "/send_group_forward_msg" && JSON.stringify(r.body).includes("甲".repeat(190)) && JSON.stringify(r.body).includes("乙".repeat(190))));
+    const merged = requests.find(r => r.url === "/send_group_forward_msg" && JSON.stringify(r.body).includes("甲".repeat(190)));
+    assert.equal(merged.body.messages.length, 2);
+    assert.deepEqual(merged.body.messages.map(node => node.data.content.find(segment => segment.type === "text").data.text), ["甲".repeat(190) + "。", "乙".repeat(190) + "。"]);
     for (const [user, text] of [
       [1, "first group message"],
       [2, "second group message"],
@@ -219,13 +233,13 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     }
     await waitFor(() => resets.length === 1, 12000);
     assert.deepEqual(
-      received.slice(1).map((r) => r.key),
+      received.slice(2).map((r) => r.key),
       ["chat:group:123", "chat:group:123"],
     );
-    assert.match(received[1].input, /first group message/);
-    assert.match(received[2].input, /second group message/);
-    assert.equal(received[1].context.title, "【群聊】铁砧工艺交流反馈☕（123）");
-    assert.equal(received[2].context.route.userId, "2");
+    assert.match(received[2].input, /first group message/);
+    assert.match(received[3].input, /second group message/);
+    assert.equal(received[2].context.title, "【群聊】铁砧工艺交流反馈☕（123）");
+    assert.equal(received[3].context.route.userId, "2");
     assert.equal(queries, 1);
     await waitFor(() => requests.some((r) => r.url === "/send_group_msg" && JSON.stringify(r.body).includes("example-release")));
     assert.deepEqual(resets, ["chat:group:123"]);

@@ -70,7 +70,56 @@ await build({
                 "    };\n    fs.watchFile(resolved, { interval: 1000 }, listener);\n    this.watcher = { close: () => fs.unwatchFile(resolved, listener) };\n  }\n\n  /** 停止文件监听 */",
               );
           }
-          if (file === path.join(vendor, "src", "index.ts"))
+          if (file === path.join(vendor, "src", "index.ts")) {
+            const replace = (from, to) => {
+              if (!contents.includes(from)) {
+                throw new Error(`QQ 发送队列适配锚点缺失：${from}`);
+              }
+              contents = contents.replace(from, to);
+            };
+            const replaceSection = (from, until, replacement) => {
+              const start = contents.indexOf(from);
+              const end = contents.indexOf(until, start + from.length);
+              if (start < 0 || end < 0) {
+                throw new Error(`QQ 发送队列适配区间缺失：${from}`);
+              }
+              contents = contents.slice(0, start) + replacement + contents.slice(end);
+            };
+            contents = `import { QQSendQueue } from ${JSON.stringify(path.resolve("src/qq-send-queue.ts"))};\nimport { getHermesConfig } from '@/features/hermes/config';\n${contents}`;
+            replace("  private operationQueue: (() => void)[] = [];", "  private readonly synapseSendQueue: QQSendQueue;");
+            replace("  private lastOperationHandle = -1;\n", "");
+            replace("    setInterval(() => this.handlerOperationQueue(this), 2000);", `    this.synapseSendQueue = new QQSendQueue({
+      request: async (action, payload, signal) => {
+        const response = await this.axiosInstance.post('/' + action, payload, { signal });
+        if (response.data?.retcode && response.data.retcode !== 0) {
+          throw new Error('OneBot 发送失败：' + (response.data.wording || response.data.message || response.data.retcode));
+        }
+        return response.data?.data?.message_id;
+      },
+      limits: () => getHermesConfig(),
+      identity: () => this.getLoginInfo(),
+      sent: event => this.notifyGroupMessageSent(event as GroupMessageSentEvent),
+      onError: error => this.logger?.error('[Synapse] QQ 发送失败：' + String(error)),
+    });`);
+            replaceSection("  private handlerOperationQueue(", "  public listen<", `  private operation(func: () => void) {
+    this.synapseSendQueue.operation(func);
+  }
+
+`);
+            replaceSection("  public sendPrivateMsg(", "  /** 把调用方的 ForwardNode", `  public sendPrivateMsg(userID: string | number, message: SentMessage, options?: { merge?: boolean }): Promise<number | undefined> {
+    return this.synapseSendQueue.send('private', userID, message, options);
+  }
+
+  public sendGroupMsg(groupId: string | number, message: SentMessage, options?: SendGroupMsgOptions): Promise<number | undefined> {
+    return this.synapseSendQueue.send('group', groupId, message, options);
+  }
+
+  public sendGroupForwardMsg(groupId: string | number, nodes: ForwardNode[], options?: SendGroupMsgOptions): Promise<number | undefined> {
+    return this.synapseSendQueue.send('group', groupId, nodes.map(node => QQBot.toForwardNodeMessage(node)), options);
+  }
+
+`);
+            replace("  public stop(): QQBot {\n    this.stopping = true;", "  public stop(): QQBot {\n    this.stopping = true;\n    this.synapseSendQueue.close();");
             contents = contents.replace(
               "github.start(botConfig.githubPort);",
               `
@@ -80,6 +129,7 @@ await build({
         process.on('disconnect', () => process.exit(0));
         process.send?.({ type: 'ready' });`,
             );
+          }
           if (file.endsWith(path.join("src", "custom.ts")))
             contents = contents.replace(
               "const result = await restartApplication();",
@@ -106,6 +156,46 @@ await build({
               }
               contents = contents.slice(0, start) + replacement + contents.slice(end);
             };
+            replaceSection("  /**\n   * 把一段发送任务挂到会话的串行链上", "  /** 等待串行链上全部发送完成", `  /** 同步提交发送任务，保存完成屏障以便本轮收尾等待。 */
+  private enqueueSend(run: RunState | undefined, task: () => Promise<void>): Promise<void> {
+    const next = task();
+    if (run) {
+      // QQ 队列负责发送顺序，此处等待本轮所有已提交的消息完成。
+      run.sendChain = Promise.allSettled([run.sendChain, next]).then(() => undefined);
+    }
+    return next;
+  }
+
+`);
+            replace("  /** 等待串行链上全部发送完成（finishRun 收尾与测试用） */", "  /** 等待本轮已提交的全部发送完成。 */");
+            replaceSection("  /**\n   * 批量发送回复单元：整批作为串行链上的", "  private async sendReplyUnits(", "  /** 同步提交整批回复单元，由 QQ 会话队列保持顺序并合并待发消息。 */\n");
+            replace("  /** 单条单元的实际发送（不做排队，仅供串行链内部调用） */", "  /** 提交单条回复单元，发送顺序由 QQ 会话队列保证。 */");
+            replace("    // 整批入链（内部按序发完），避免与后续 flush 交错", "    // 同步提交整批单元，后续输出在 QQ 会话队列中继续合并。");
+            replace("            // 整批入链，避免被随后到达的 delta flush 插队", "            // 同步提交整批文本，顺序由 QQ 会话队列保证。");
+            replace(
+              "      for (const unit of units) {\n        await this.sendSingleUnit(route, unit, replyMsgId, run);\n      }",
+              "      await Promise.all(units.map(unit => this.sendSingleUnit(route, unit, replyMsgId, run)));",
+            );
+            replace(
+              "    for (const chunk of chunks) {\n      if (route.type === 'group') {\n        await this.bot.sendGroupMsg(route.groupId!, [{ type: 'text', data: { text: chunk } }]);\n      } else {\n        await this.bot.sendPrivateMsg(route.userId, [{ type: 'text', data: { text: chunk } }]);\n      }\n    }",
+              "    await Promise.all(chunks.map(chunk => route.type === 'group'\n      ? this.bot!.sendGroupMsg(route.groupId!, [{ type: 'text', data: { text: chunk } }])\n      : this.bot!.sendPrivateMsg(route.userId, [{ type: 'text', data: { text: chunk } }])));",
+            );
+            replace(
+              "      for (const chunk of chunks) {\n        await this.bot.sendGroupMsg(route.groupId!, [\n          { type: 'reply', data: { id: userMsgId } },\n          { type: 'text', data: { text: chunk } }\n        ]);\n      }",
+              "      await Promise.all(chunks.map(chunk => this.bot!.sendGroupMsg(route.groupId!, [\n        { type: 'reply', data: { id: userMsgId } },\n        { type: 'text', data: { text: chunk } }\n      ])));",
+            );
+            replace(
+              "    // 无论发送成功与否都置位：避免失败时每条单元都重复贴引用\n    if (run && attachReply) run.replySent = true;\n",
+              "",
+            );
+            replace(
+              "    if (route.type === 'group') {\n      await this.bot.sendGroupMsg(route.groupId!, segments);",
+              "    if (run && attachReply) { run.replySent = true; }\n    if (route.type === 'group') {\n      await this.bot.sendGroupMsg(route.groupId!, segments);",
+            );
+            replace(
+              "        { type: 'text', data: { text: config.privateReceiptText } }\n      ]);",
+              "        { type: 'text', data: { text: config.privateReceiptText } }\n      ], { merge: false });",
+            );
             replace("import { SkillManager } from '@/features/hermes/skills';\n", "");
             replace("  private readonly skillManager = new SkillManager();\n", "");
             replace("import { Github } from '@/features/github';\n", "");

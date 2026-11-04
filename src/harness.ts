@@ -133,13 +133,16 @@ export class Harness {
     title?: string,
     instructions: InstructionFile[] = [],
   ): Promise<string> {
+    const config = this.config();
     const signal = AbortSignal.any([
       this.shutdown.signal,
-      AbortSignal.timeout(this.config().timeoutSec * 1000),
+      ...(config.timeoutSec === -1 ? [] : [AbortSignal.timeout(config.timeoutSec * 1000)]),
       ...(callerSignal ? [callerSignal] : []),
     ]);
     signal.throwIfAborted();
-    const config = this.config();
+    if (config.timeoutSec === 0) {
+      throw new DOMException("单次任务已超时", "TimeoutError");
+    }
     const selection = (channel === "review" ? config.reviewModel : config.chatModel)
       ?? this.loader.services.get("agentDefaultModel")?.currentSelection?.();
     if (!selection?.provider || !selection?.model) {
@@ -389,11 +392,16 @@ export class Harness {
           return { ...rest, ...resident.turn.selection };
         });
       scope.on("agent/pre-step", (event, next) => {
-        if (event.agent !== agent) return next();
-        if (!resident.turn)
+        if (event.agent !== agent) {
+          return next();
+        }
+        if (!resident.turn) {
           throw new Error("此通道会话只接受 Synapse 队列中的消息");
-        if (++resident.turn.steps > this.config().maxToolRounds)
+        }
+        const maxSteps = this.config().maxToolRounds;
+        if (++resident.turn.steps > maxSteps && maxSteps !== -1) {
           throw new Error("已达到任务步骤上限");
+        }
         return next();
       });
       scope.on("agent/error", (event) => {

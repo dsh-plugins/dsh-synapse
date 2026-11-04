@@ -36,7 +36,11 @@ Requires DSH `0.1.5` or newer, Node.js `24.9+`, and `npm`. For QQ, run a OneBot 
 
 Each QQ group and its bridged Discord channel share a single ongoing conversation while keeping track of who said what. QQ direct messages are kept separate for each user, and GitHub reviews are kept separate for each repository. Messages within the same conversation are handled one by one in the order they arrive.
 
+QQ 发送按群聊和私聊独立排队，由全局调度器以至少 2 秒间隔轮流发送；一个会话等待回执时，其他会话可继续发送。同一会话待发的兼容消息先合并，合并后超过现有字符阈值、行数阈值或单条最大字符数时转为聊天记录。阈值默认 300 字符或 5 行，`0` 关闭对应阈值；不同引用、消息来源、语音保持分开，桥接消息与可撤回回执保留独立消息 ID。
+
 Send `stop` or `停止` to cancel the current reply and let the next queued message proceed. Send `reset`, `新对话`, or `清除上下文` to cancel active and queued tasks and start a new conversation, keeping saved long-term memory. Use `/help` to see available commands; management commands for reloading, restarting, and shutting down require the appropriate admin permissions.
+
+“任务运行限制”中的“单次任务超时（秒）”和“单次任务最大步骤数”均支持 `-1`，分别取消聊天与 GitHub 审查的 Synapse 自动超时和步骤上限。默认值为 120 秒和 6 步，有限值范围为 0–600 秒和 0–20 步，`0` 分别表示立即超时和禁止执行步骤；手动停止和插件关闭仍会取消任务。
 
 When session persistence is enabled in DSH, reloading can restore the conversation. Unfinished chat messages must be sent again after a reload.
 
