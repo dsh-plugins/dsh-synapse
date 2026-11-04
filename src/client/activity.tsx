@@ -5,12 +5,34 @@ import { EditorDialog, ErrorNotice, MANAGER_CSS, TableArea, useRequests } from "
 
 const time = (value: number) => value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "无";
 const types = { check: "检查", roll: "掷骰", hit: "命中", skip: "跳过", submit: "提交", commit: "原生确认", send: "发送", failure: "失败", config: "配置变更", recovery: "恢复" };
-const fields: Record<string, [string, string, boolean?][]> = {
-  probability: [["baseBps", "基础概率", true], ["minBps", "最低概率", true], ["maxBps", "最高概率", true], ["cooldownSec", "冷却（秒）"], ["perMinute", "每分钟限额"], ["perHour", "每小时限额"]],
-  idle: [["probabilityBps", "命中概率", true], ["windowMinutes", "窗口中心（分钟）"], ["jitterMinutes", "窗口浮动（分钟）"], ["cooldownSec", "冷却（秒）"], ["perHour", "每小时限额"], ["perDay", "每日限额"], ["delayMinSec", "最短延迟（秒）"], ["delayMaxSec", "最长延迟（秒）"]],
-  words: [["windowHours", "词频窗口（小时）"], ["halfLifeHours", "半衰期（小时）"], ["maxBoostPercent", "最大词云加成（%，至多 200）"]],
+/** 每项为 [键, 标签, 是否以百分比展示, 说明]；百分比字段按万分比整数保存。 */
+const fields: Record<string, [string, string, boolean, string][]> = {
+  probability: [
+    ["baseBps", "基础概率", true, "普通消息触发回复的概率，热词会在此基础上加成。"],
+    ["minBps", "最低概率", true, "加成后的概率下限，需要不高于基础概率。"],
+    ["maxBps", "最高概率", true, "加成后的概率上限，需要不低于基础概率。"],
+    ["cooldownSec", "发言后冷却（秒）", false, "机器人在本群发言后，这段时间内不再概率回复。"],
+    ["perMinute", "每分钟最多次数", false, "滚动 1 分钟内概率回复的次数上限。"],
+    ["perHour", "每小时最多次数", false, "滚动 1 小时内概率回复的次数上限。"],
+  ],
+  idle: [
+    ["probabilityBps", "发言概率", true, "群里安静到期后，主动开启话题的概率。"],
+    ["windowMinutes", "安静多久后尝试（分钟）", false, "距离上一条真人消息约这么久后尝试一次。"],
+    ["jitterMinutes", "随机浮动（分钟）", false, "实际等待时间在上一项前后随机浮动这么多，需要小于上一项。"],
+    ["cooldownSec", "发言后冷却（秒）", false, "机器人在本群发言后，这段时间内不主动开启话题。"],
+    ["perHour", "每小时最多次数", false, "滚动 1 小时内主动发言的次数上限。"],
+    ["perDay", "每天最多次数", false, "按下方时区的自然日计算。"],
+    ["delayMinSec", "发送前最短等待（秒）", false, "决定发言后随机等待一段时间，期间有人说话就取消。"],
+    ["delayMaxSec", "发送前最长等待（秒）", false, "需要不小于最短等待。"],
+  ],
+  words: [
+    ["windowHours", "统计最近多少小时", false, "只用这段时间内的消息统计群内热词。"],
+    ["halfLifeHours", "热度减半时间（小时）", false, "越早的消息权重越低，每过这么久权重减半。"],
+    ["maxBoostPercent", "热词最大加成（%）", false, "消息含热词时，基础概率最多提高的百分比，至多 200。"],
+  ],
 };
-const FORM_CSS = `.synapse-activity-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}.synapse-activity-field{display:flex;flex-direction:column;gap:6px}.synapse-activity-switches{display:flex;align-items:center;flex-wrap:wrap;gap:16px;margin:12px 0}.synapse-activity-filter{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.synapse-activity-filter>.arco-input-wrapper{width:180px}`;
+const SECTIONS = { probability: "概率回复：普通消息按概率触发回复", idle: "空闲消息：群里安静一段时间后主动开启话题", words: "热词加成：消息含群内热词时提高回复概率" };
+const FORM_CSS = `.synapse-activity-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.synapse-activity-field{display:flex;flex-direction:column;gap:6px}.synapse-activity-help{color:var(--color-text-3);font-size:12px;line-height:1.5}.synapse-activity-switches{display:flex;align-items:center;flex-wrap:wrap;gap:16px;margin:12px 0}.synapse-activity-filter{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.synapse-activity-filter>.arco-input-wrapper{width:180px}`;
 
 function Lines({ values, label, placeholder, change }: { values: (number | string)[]; label: string; placeholder: string; change(value: string[]): void }) {
   const [text, setText] = React.useState(values.join("\n"));
@@ -21,12 +43,17 @@ function Parameters({ value, change }: { value: ActivitySettings; change(next: A
   const set = (section: string, key: string, next: unknown) => change({ ...value, [section]: { ...value[section], [key]: next } });
   return <>
     {Object.entries(fields).map(([section, items]) => <React.Fragment key={section}>
-      <Arco.Divider orientation="left">{{ probability: "概率回复", idle: "空闲消息", words: "持久化词云" }[section]}</Arco.Divider>
-      <div className="synapse-activity-grid">{items.map(([key, label, percent]) => <label className="synapse-activity-field" key={key}>{label}
+      <Arco.Divider orientation="left">{SECTIONS[section]}</Arco.Divider>
+      <div className="synapse-activity-grid">{items.map(([key, label, percent, help]) => <label className="synapse-activity-field" key={key}>{label}
         <Arco.InputNumber aria-label={label} value={value[section][key] / (percent ? 100 : 1)} min={0} max={percent ? 100 : undefined} precision={percent ? 2 : 0}
           suffix={percent ? "%" : undefined} onChange={next => set(section, key, Math.round(Number(next) * (percent ? 100 : 1)))} />
+        <span className="synapse-activity-help">{help}</span>
       </label>)}</div>
-      {section === "idle" && <div className="synapse-activity-grid" style={{ marginTop: 12 }}>{[["quietStart", "静默开始（HH:mm）"], ["quietEnd", "静默结束（HH:mm）"], ["timeZone", "时区"]].map(([key, label]) => <label className="synapse-activity-field" key={key}>{label}<Arco.Input aria-label={label} value={value.idle[key]} onChange={next => set("idle", key, next)}/></label>)}</div>}
+      {section === "idle" && <div className="synapse-activity-grid" style={{ marginTop: 12 }}>{[
+        ["quietStart", "静默开始（HH:mm）", "每天这段时间内不主动发言，支持跨夜，例如 23:00 到 06:00。"],
+        ["quietEnd", "静默结束（HH:mm）", "开始与结束相同时表示不设静默时段。"],
+        ["timeZone", "时区", "IANA 时区名，例如 Asia/Shanghai，用于静默时段与每日次数。"],
+      ].map(([key, label, help]) => <label className="synapse-activity-field" key={key}>{label}<Arco.Input aria-label={label} value={value.idle[key]} onChange={next => set("idle", key, next)}/><span className="synapse-activity-help">{help}</span></label>)}</div>}
     </React.Fragment>)}
     <Arco.Divider orientation="left">概率回复屏蔽词</Arco.Divider>
     <Lines label="概率回复屏蔽词" placeholder="每行一个；命中后仍记录背景与真人活跃" values={value.blockedWords} change={next => change({ ...value, blockedWords: next })}/>
@@ -71,7 +98,7 @@ export function ActivityPanel({ view, client }: ConfigPanelProps) {
     <style>{MANAGER_CSS + FORM_CSS}</style>
     <div className="synapse-manager-toolbar"><Arco.Button onClick={() => { void open(); }} disabled={request.busy}>编辑群聊策略</Arco.Button><Arco.Button onClick={() => { void refresh(); }} loading={request.busy}>刷新状态</Arco.Button></div>
     <ErrorNotice error={request.error}/>
-    <p>仅用于已启用聊天的 QQ 群。两个主动功能都需要全局和群级开关同时开启；背景窗口最多 100 条，图片由模型按需读取。</p>
+    <p>只对已在「对话行为」中启用对话的 QQ 群生效。概率回复和空闲消息都要同时打开全局开关和本群开关。每个群最多保留最近 100 条未触发的消息作为背景，图片由模型按需读取。</p>
     <TableArea><Arco.Table rowKey="groupId" data={rows} size="small" pagination={false} columns={[
       { title: "群", render: (_value, row) => `${row.name || ""}（${row.groupId}）` },
       { title: "窗口 / 状态", render: (_value, row) => <>{row.contextCount} 条 / {row.busy ? "回复中" : "空闲"}{row.claimedContextCount > 0 && <><br/>{row.claimedContextCount} 条提交中</>}</> },
@@ -98,19 +125,19 @@ export function ActivityPanel({ view, client }: ConfigPanelProps) {
       <div className="synapse-activity-switches"><label>全局概率回复 <Arco.Switch checked={draft.probabilityEnabled} onChange={value => setDraft({ ...draft, probabilityEnabled: value })}/></label><label>全局空闲消息 <Arco.Switch checked={draft.idleEnabled} onChange={value => setDraft({ ...draft, idleEnabled: value })}/></label><Arco.Button onClick={() => setSelected(undefined)}>编辑全局默认值</Arco.Button></div>
       <TableArea><Arco.Table rowKey="groupId" size="small" pagination={false} data={draft.groups} columns={[
         { title: "群号", dataIndex: "groupId" }, { title: "概率", render: (_value, row) => row.probabilityEnabled ? "启用" : "关闭" },
-        { title: "空闲", render: (_value, row) => row.idleEnabled ? "启用" : "关闭" }, { title: "参数", render: (_value, row) => row.useDefaults ? "继承全局" : "群级自定义" },
+        { title: "空闲", render: (_value, row) => row.idleEnabled ? "启用" : "关闭" }, { title: "参数", render: (_value, row) => row.useDefaults ? "使用全局参数" : "本群单独设置" },
         { title: "操作", render: (_value, row) => <Arco.Space><Arco.Button size="small" onClick={() => setSelected(row.groupId)}>编辑</Arco.Button><Arco.Button size="small" onClick={() => { setDraft({ ...draft, groups: draft.groups.filter(item => item.groupId !== row.groupId) }); if (selected === row.groupId) { setSelected(undefined); } }}>移除</Arco.Button></Arco.Space> },
       ]}/></TableArea>
       <Arco.Space style={{ marginTop: 12 }}><Arco.InputNumber aria-label="新增群号" placeholder="群号" value={newGroup} min={1} precision={0} onChange={setNewGroup}/><Arco.Button onClick={add}>新增群策略</Arco.Button></Arco.Space>
       {group ? <>
         <div className="synapse-activity-switches"><label>群概率回复 <Arco.Switch checked={group.probabilityEnabled} onChange={value => updateGroup({ probabilityEnabled: value })}/></label><label>群空闲消息 <Arco.Switch checked={group.idleEnabled} onChange={value => updateGroup({ idleEnabled: value })}/></label>
-          <label>继承全局参数 <Arco.Switch checked={group.useDefaults} onChange={value => { const { probability, idle, words, blockedWords } = structuredClone(draft); updateGroup(value ? { useDefaults: true } : { useDefaults: false, probability, idle, words, blockedWords }); }}/></label></div>
-        {group.useDefaults ? <p>本群使用全局默认参数，关闭继承后可单独编辑。</p> : <Parameters key={group.groupId} value={group} change={updateGroup}/>}
+          <label>使用全局参数 <Arco.Switch checked={group.useDefaults} onChange={value => { const { probability, idle, words, blockedWords } = structuredClone(draft); updateGroup(value ? { useDefaults: true } : { useDefaults: false, probability, idle, words, blockedWords }); }}/></label></div>
+        {group.useDefaults ? <p>本群使用全局参数。关闭「使用全局参数」后，可以为本群单独设置。</p> : <Parameters key={group.groupId} value={group} change={updateGroup}/>}
       </> : <>
         <Parameters key="global" value={draft} change={next => setDraft({ ...draft, ...next })}/>
         <Arco.Divider orientation="left">缓存与日志</Arco.Divider><div className="synapse-activity-grid">{[["imageRetentionDays", "图片保留天数"], ["logRetentionDays", "日志保留天数"]].map(([key, label]) => <label key={key} className="synapse-activity-field">{label}<Arco.InputNumber aria-label={label} min={1} precision={0} value={draft[key]} onChange={value => setDraft({ ...draft, [key]: value })}/></label>)}</div>
         <Arco.Divider orientation="left">其他机器人 QQ 号</Arco.Divider><Lines label="其他机器人 QQ 号" placeholder="每行一个 QQ 号；自身机器人自动排除" values={draft.botUsers} change={value => setDraft({ ...draft, botUsers: value.map(Number) })}/>
-        <p>AI 忽略名单在“聊天与通知功能 → QQ / Discord 消息行为”中编辑。名单只影响 AI 输入、窗口、词云与真人活跃。</p>
+        <p>AI 忽略名单在「聊天与通知功能 → 对话行为」中编辑。名单只影响 AI 输入、背景窗口、热词统计与真人活跃时间。</p>
       </>}
     </EditorDialog>}
   </>;

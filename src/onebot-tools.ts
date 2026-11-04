@@ -20,7 +20,7 @@ function endpoint(base: string, input: string): URL {
 
 async function call(config: ConfigSource, path: string, params: Record<string, unknown>, signal: AbortSignal) {
   signal.throwIfAborted();
-  const c = config(), url = endpoint(c.httpUrl, path);
+  const c = config().connection, url = endpoint(c.httpUrl, path);
   const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
   let response: Response;
   try {

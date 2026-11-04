@@ -43,13 +43,13 @@ export class Agent {
   }
   async context(input, channel) {
     const query = typeof input === "string" ? input : JSON.stringify(input);
-    const memories = this.config().ragEnabled
+    const memories = this.config().memory.enabled
       ? await this.memory.search(query, channel)
       : [];
     const skills = await this.skills.retrieve(query, channel);
-    const c = this.config();
+    const c = this.config().memory;
     const learning = [
-      c.ragEnabled && c.learnMemory && c.memoryPrompt
+      c.enabled && c.learnMemory && c.memoryPrompt
         ? `遇到已核实的重要信息时，调用 synapse_memory_summarize 交由记忆子代理保存，并等待其返回结果；不要自行调用写入工具，日常闲聊也不必记录。以下规则用于判断何时触发总结，具体的检索、去重和写入均由子代理完成：\n<memory_subagent_policy>\n${c.memoryPrompt}\n</memory_subagent_policy>` : "",
       c.learnSkills && c.skillPrompt
         ? `完成任务并验证可复用的操作步骤后，调用 synapse_skill_summarize 交由 Skill 子代理整理保存，并等待其返回结果；不要自行调用写入工具。以下规则用于判断何时触发总结，具体的检索、去重和写入均由子代理完成：\n<skill_subagent_policy>\n${c.skillPrompt}\n</skill_subagent_policy>` : "",

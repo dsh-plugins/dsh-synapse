@@ -22,7 +22,8 @@ async function fixture(t, respond = (_request, response) => response.end(JSON.st
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const c = defaultsFor(template.fields);
-  Object.assign(c, { httpUrl: `http://127.0.0.1:${server.address().port}/onebot`, httpToken: "configured-secret", ragEnabled: false, learnMemory: false, learnSkills: false });
+  Object.assign(c.connection, { httpUrl: `http://127.0.0.1:${server.address().port}/onebot`, httpToken: "configured-secret" });
+  Object.assign(c.memory, { enabled: false, learnMemory: false, learnSkills: false });
   const paths = { home: root, profile: root, data: root, skills: path.join(root, "skills") };
   const route = { type: "group", groupId: "123", userId: "7", name: "当前群", admin: false };
   t.after(async () => {
@@ -57,7 +58,7 @@ test("群与好友历史使用当前会话，保留两种后端的分页参数�
 test("通用接口拼接配置地址并自动鉴权，普通发送者获得可信身份提示且可以自行调用", async t => {
   const receipt = { status: "ok", retcode: 0, data: { message_id: 55 }, wording: "原始回执" };
   const f = await fixture(t, (_request, response) => response.end(JSON.stringify(receipt)));
-  f.c.httpUrl += "?access_token=configured-query";
+  f.c.connection.httpUrl += "?access_token=configured-query";
   const tool = f.tools().find(item => item.name === "synapse_onebot_api");
   assert.match(tool.description, /调用前必须核对真实发言者/);
   assert.match(tool.description, /"senderId":"7"/); assert.match(tool.description, /"groupId":"123"/); assert.match(tool.description, /"senderIsAdmin":false/);
@@ -69,7 +70,7 @@ test("通用接口拼接配置地址并自动鉴权，普通发送者获得可�
   const url = new URL(f.requests[0].url, "http://localhost");
   assert.equal(url.pathname, "/onebot/send_group_msg"); assert.equal(url.searchParams.get("access_token"), "configured-query"); assert.equal(url.searchParams.get("mode"), "sync");
   assert.doesNotMatch(JSON.stringify(result), /configured-secret|configured-query/);
-  f.c.httpToken = "";
+  f.c.connection.httpToken = "";
   await tool.execute({ path: "get_status", params: {} }, new AbortController().signal);
   assert.equal(f.requests[1].headers.authorization, undefined);
 });
@@ -113,10 +114,10 @@ test("OneBot 请求执行期间取消会中止 HTTP 等待", async t => {
 test("地址和请求构造失败的工具错误不泄露配置中的账号、令牌或查询凭据", async t => {
   const f = await fixture(t), tool = f.tools().find(item => item.name === "synapse_onebot_api");
   const invoke = () => tool.execute({ path: "get_status", params: {} }, new AbortController().signal);
-  f.c.httpUrl = "http://example-user:example-password@127.0.0.1:1/onebot?access_token=example-query";
+  f.c.connection.httpUrl = "http://example-user:example-password@127.0.0.1:1/onebot?access_token=example-query";
   await assert.rejects(invoke(), error => !/example-user|example-password|example-query/.test(String(error)) && /HTTP Token/.test(error.message));
-  f.c.httpUrl = "http://127.0.0.1:1/onebot?access_token=example-query";
-  f.c.httpToken = "example-header\ninvalid";
+  f.c.connection.httpUrl = "http://127.0.0.1:1/onebot?access_token=example-query";
+  f.c.connection.httpToken = "example-header\ninvalid";
   await assert.rejects(invoke(), error => !/example-query|example-header/.test(String(error)) && /请求失败/.test(error.message));
   assert.equal(f.requests.length, 0);
 });

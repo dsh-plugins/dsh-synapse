@@ -10,12 +10,12 @@ export function verifySignature(raw, secret, signature) {
     )
   );
 }
-export function repositoryAllowed(repo, patterns) {
+export function repositoryAllowed(repo, patterns: string[]) {
   return (
     typeof repo === "string" &&
     /^[\w.-]+\/[\w.-]+$/.test(repo) &&
     patterns
-      .split(/\s+/)
+      .map((p) => p.trim())
       .filter(Boolean)
       .some(
         (p) =>
@@ -52,8 +52,8 @@ export class Reviews {
       .run();
   }
   async webhook(req, res) {
-    const c = this.config();
-    if (!c.githubEnabled) return json(res, { error: "GitHub 未启用" }, 503);
+    const c = this.config().github;
+    if (!c.enabled) return json(res, { error: "GitHub 未启用" }, 503);
     const raw = await body(req);
     if (
       !verifySignature(raw, c.webhookSecret, req.headers["x-hub-signature-256"])
@@ -65,7 +65,7 @@ export class Reviews {
     if (typeof id !== "string" || !id || id.length > 128)
       return json(res, { error: "缺少 delivery ID" }, 400);
     const payload = JSON.parse(raw.toString());
-    if (!repositoryAllowed(payload.repository?.full_name, c.repositories))
+    if (!repositoryAllowed(payload.repository?.full_name, c.allowedRepositories))
       return json(res, { error: "仓库不在允许列表" }, 403);
     if (this.db.prepare("SELECT 1 FROM deliveries WHERE id=?").get(id))
       return json(res, { duplicate: true }, 202);
@@ -121,7 +121,7 @@ export class Reviews {
     const response = await fetch("https://api.github.com" + route, {
       ...options,
       headers: {
-        Authorization: `Bearer ${this.config().githubToken}`,
+        Authorization: `Bearer ${this.config().github.token}`,
         "User-Agent": "dsh-synapse",
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
@@ -148,7 +148,7 @@ export class Reviews {
       this.running = null;
       if (
         !this.closed &&
-        this.config().githubEnabled &&
+        this.config().github.enabled &&
         this.db
           .prepare("SELECT 1 FROM deliveries WHERE state='pending' LIMIT 1")
           .get()
@@ -158,7 +158,7 @@ export class Reviews {
     return this.running;
   }
   async work() {
-    while (!this.closed && this.config().githubEnabled) {
+    while (!this.closed && this.config().github.enabled) {
       const pending = this.db
         .prepare(
           "SELECT * FROM deliveries WHERE state='pending' ORDER BY rowid",
@@ -203,8 +203,8 @@ export class Reviews {
   async review(job) {
     const payload = JSON.parse(job.payload),
       repo = payload.repository.full_name,
-      c = this.config();
-    if (!repositoryAllowed(repo, c.repositories))
+      c = this.config().github;
+    if (!repositoryAllowed(repo, c.allowedRepositories))
       throw new Error("仓库已从允许列表移除");
     const isPR = job.event === "pull_request",
       number = payload.number || payload.issue?.number;

@@ -140,11 +140,11 @@ export class Harness {
     const config = this.config();
     const signal = AbortSignal.any([
       this.shutdown.signal,
-      ...(config.timeoutSec === -1 ? [] : [AbortSignal.timeout(config.timeoutSec * 1000)]),
+      ...(config.limits.timeoutSec === -1 ? [] : [AbortSignal.timeout(config.limits.timeoutSec * 1000)]),
       ...(callerSignal ? [callerSignal] : []),
     ]);
     signal.throwIfAborted();
-    if (config.timeoutSec === 0) {
+    if (config.limits.timeoutSec === 0) {
       throw new DOMException("单次任务已超时", "TimeoutError");
     }
     const selection = (channel === "review" ? config.reviewModel : config.chatModel)
@@ -399,7 +399,7 @@ export class Harness {
     if (stored && stored.header.cwd !== cwd && (workspaces || !workingDirectory?.set)) {
       throw Object.assign(new Error("历史会话需要切换到通道工作区"), { name: "SessionWorkspaceChangedError" });
     }
-    const preset = this.config().sessionPermission;
+    const preset = this.config().limits.sessionPermission;
     const permissions = this.loader.services.get("permissionPresets");
     if (!stored) {
       if (!permissions?.set)
@@ -464,7 +464,7 @@ export class Harness {
         if (!resident.turn) {
           throw new Error("此通道会话只接受 Synapse 队列中的消息");
         }
-        const maxSteps = this.config().maxToolRounds;
+        const maxSteps = this.config().limits.maxToolRounds;
         if (++resident.turn.steps > maxSteps && maxSteps !== -1) {
           throw new Error("已达到任务步骤上限");
         }

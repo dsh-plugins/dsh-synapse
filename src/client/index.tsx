@@ -52,12 +52,12 @@ export function apply(ctx: {
   for (const [id, component] of [["skills", SkillsPanel], ["mcp", McpPanel], ["memory-import", MemoryImportPanel], ["reviews", ReviewsPanel], ["activity", ActivityPanel]] as const) {
     ctx.dshLoaderUi.config.registerPanel(ctx, { id, configId: "dsh-synapse", component });
   }
-  for (const [field, label] of [["memoryPrompt", "记忆"], ["skillPrompt", "Skill"]] as const) {
+  for (const [field, label] of [["memoryPrompt", "记录规则"], ["skillPrompt", "总结规则"]] as const) {
     ctx.dshLoaderUi.config.registerDialog<string>(ctx, {
       id: field === "memoryPrompt" ? "memory-prompt-editor" : "skill-prompt-editor",
       configId: "dsh-synapse",
-      field: [field],
-      title: `编辑${label}提示词`,
+      field: ["memory", field],
+      title: `编辑${label}`,
       component: PromptEditor,
     });
   }

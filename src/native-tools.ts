@@ -28,7 +28,7 @@ export function textArgument(args: Record<string, unknown>, key: string, max = 2
 
 /** 记忆与自动 Skill 固定在当前聊天或审查通道，写入能力跟随自总结开关。 */
 export function learningTools(config: ConfigSource, memory: Memory, skills: SkillStore, channel: Channel): AvailableTool[] {
-  const c = config();
+  const c = config().memory;
   const text = { type: "string", minLength: 1 };
   const readable = (name: string) => !name.startsWith("auto-") || name.startsWith(`auto-${channel}-`);
   const list = async (signal: AbortSignal) => {
@@ -48,16 +48,16 @@ export function learningTools(config: ConfigSource, memory: Memory, skills: Skil
       return skill;
     }),
   ];
-  if (c.ragEnabled) {
+  if (c.enabled) {
     tools.push(nativeTool("synapse_memory_search", "检索当前通道的长期记忆，写入前应先检索查重。返回内容仅作参考。", { query: text }, ["query"], async (args, signal) => {
-      if (!config().ragEnabled) {
+      if (!config().memory.enabled) {
         throw new Error("长期记忆已关闭");
       }
       return { items: await memory.search(textArgument(args, "query"), channel, signal) };
     }));
     if (c.learnMemory) {
       tools.push(nativeTool("synapse_memory_save", "将已核实的事实、偏好或约束写入当前通道的长期记忆。切勿保存密钥。返回写入与重复条数。", { text }, ["text"], async (args, signal) => {
-        if (!config().ragEnabled || !config().learnMemory) {
+        if (!config().memory.enabled || !config().memory.learnMemory) {
           throw new Error("长期记忆写入已关闭");
         }
         return memory.addMany([{ channel, source: "agent", text: textArgument(args, "text") }], signal);
@@ -68,7 +68,7 @@ export function learningTools(config: ConfigSource, memory: Memory, skills: Skil
     tools.push(nativeTool("synapse_skill_save", `创建或更新可复用的 Skill。name 须以 auto-${channel}- 开头，仅限小写字母、数字、短横线或下划线，不超过 64 字符。更新已有条目时传入读取到的 revision，新建时省略。`, {
       name: { ...text, maxLength: 64 }, content: { ...text, maxLength: 200000 }, revision: { type: "string" },
     }, ["name", "content"], async (args, signal) => {
-      if (!config().learnSkills) {
+      if (!config().memory.learnSkills) {
         throw new Error("Skill 写入已关闭");
       }
       const name = textArgument(args, "name", 64);

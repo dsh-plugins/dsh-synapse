@@ -12,13 +12,9 @@ import { hostFixture } from "./fixtures/host.mjs";
 async function fixture(t) {
   const home = await mkdtemp(path.join(os.tmpdir(), "synapse-chat-tools-"));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const c = {
-    ...defaultsFor(template.fields),
-    repositories: "foo/*",
-    ragEnabled: false,
-    learnMemory: false,
-    learnSkills: false,
-  };
+  const c = defaultsFor(template.fields);
+  c.github.allowedRepositories = ["foo/*"];
+  Object.assign(c.memory, { enabled: false, learnMemory: false, learnSkills: false });
   c.modules.github.subscriptions = [{ repository: "foo/bar", groups: [123] }];
   c.modules.chat.admins = [7];
   const paths = {
@@ -193,7 +189,7 @@ test("六类查询和群管理工具返回实际结果，群号由可信聊天�
     (await call("synapse_modrinth_version", { slug: "example" })).version,
     "example+mc",
   );
-  f.c.httpToken = "onebot-secret";
+  f.c.connection.httpToken = "onebot-secret";
   await call("synapse_group_mute", {
     userId: "9",
     minutes: 10,

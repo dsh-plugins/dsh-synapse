@@ -36,7 +36,7 @@ export function chatTools(
   ) => {
     signal.throwIfAborted();
     const headers = new Headers(init.headers);
-    headers.set("User-Agent", config().userAgent);
+    headers.set("User-Agent", config().connection.userAgent);
     const response = await fetch(url, {
       ...init,
       headers,
@@ -126,7 +126,7 @@ export function chatTools(
           Object.values(bindings.bindings ?? {}).some((names) =>
             names.some((name) => name.toLowerCase() === owner),
           );
-        if (!repositoryAllowed(repository, config().repositories) && !bound) {
+        if (!repositoryAllowed(repository, config().github.allowedRepositories) && !bound) {
           throw new Error("仓库未在允许列表中，且其所有者未绑定 GitHub 账号");
         }
         // 聊天查询复用公开代理，不携带审查 Token，避免向聊天通道暴露私有仓库。
@@ -385,7 +385,7 @@ export function chatTools(
           throw new Error("发送者已不具备管理员权限");
         }
       }
-      const c = config();
+      const c = config().connection;
       const result = await json(
         `${c.httpUrl.replace(/\/$/, "")}/${action}`,
         signal,

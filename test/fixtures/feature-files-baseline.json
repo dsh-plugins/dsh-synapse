@@ -1,0 +1,245 @@
+{
+  "config": {
+    "enabled": false,
+    "chatModel": null,
+    "reviewModel": null,
+    "httpUrl": "http://127.0.0.1:3100",
+    "wsUrl": "ws://127.0.0.1:3101",
+    "httpToken": "example-token",
+    "wsToken": "example-token",
+    "tokenParams": "?access_token=",
+    "chromePath": "",
+    "userAgent": "Mozilla/5.0",
+    "logLevel": "info",
+    "sessionPermission": "read-only",
+    "timeoutSec": 120,
+    "maxToolRounds": 6,
+    "githubEnabled": true,
+    "githubToken": "gh-example",
+    "webhookSecret": "secret-example",
+    "repositories": "foo/bar\nexample/*",
+    "publishReviews": false,
+    "maxDiffChars": 80000,
+    "ragEnabled": true,
+    "embeddingModel": {
+      "source": "local",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "apiKey": "",
+      "model": "BAAI/bge-m3",
+      "dimensions": 0
+    },
+    "recallK": 50,
+    "memoryK": 8,
+    "reranker": false,
+    "rerankModel": {
+      "source": "local",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "apiKey": "",
+      "model": "BAAI/bge-reranker-v2-m3"
+    },
+    "learnMemory": true,
+    "memoryPrompt": "在对话或审查中留意值得长期保留的信息，如已核实的事实、用户偏好、长期约束和关键决定。发现此类信息时，先调用 synapse_memory_search 查重，再调用 synapse_memory_save 写入当前通道的记忆库，不必等用户主动要求。记忆内容应简明具体，需要时注明适用范围；切勿记录密钥、凭据、未经核实的推测或临时状态。仅在工具返回写入成功后才告知用户已保存；日常闲聊不必记录。",
+    "learnSkills": true,
+    "skillPrompt": "在完成任务后，将本次已验证通过且后续可复用的操作步骤整理为 Skill。先调用 synapse_skill_list 和 synapse_skill_read 查阅现有内容，再调用 synapse_skill_save 保存；新建 Skill 使用当前通道的 auto-chat- 或 auto-review- 前缀，更新已有条目时传入读取到的 revision。写明适用场景、前置条件、操作步骤、验证方式与注意事项，避免重复创建。切勿将猜测、未验证方案、密钥或单次对话保存为 Skill，也不得借此扩大工具权限。仅在工具返回成功后才确认已保存。",
+    "maxMemories": 20000,
+    "modules": {
+      "management": {
+        "groups": [
+          11
+        ],
+        "operators": [
+          21,
+          22
+        ],
+        "discordOperators": [
+          "900"
+        ]
+      },
+      "parentheses": {
+        "groups": [
+          31
+        ]
+      },
+      "poke": {
+        "groups": [
+          32
+        ]
+      },
+      "minecraft": {
+        "groups": [
+          33
+        ]
+      },
+      "modrinth": {
+        "groups": [
+          34
+        ]
+      },
+      "command": {
+        "groups": [
+          35,
+          36
+        ]
+      },
+      "bili": {
+        "groups": [
+          41
+        ],
+        "follow": [
+          4001
+        ]
+      },
+      "github": {
+        "subscriptions": [
+          {
+            "repository": "foo/bar",
+            "groups": [
+              51
+            ]
+          }
+        ]
+      },
+      "welcome": {
+        "welcomes": [
+          {
+            "group": [
+              61
+            ],
+            "msg": "欢迎 ${at}"
+          }
+        ]
+      },
+      "discord": {
+        "token": "discord-example",
+        "bridges": [
+          {
+            "guildId": "123",
+            "channelName": "general",
+            "group": "71",
+            "needReply": true,
+            "needCmd": false
+          }
+        ]
+      },
+      "chat": {
+        "botName": "示例",
+        "groups": [
+          81,
+          82
+        ],
+        "admins": [
+          83
+        ],
+        "allowedUsers": [
+          84
+        ],
+        "blockedUsers": [
+          85
+        ],
+        "requireMention": false,
+        "keywordTriggers": [
+          "foo"
+        ],
+        "progressRateLimitSec": 9,
+        "progressAsImage": false,
+        "progressMaxTools": 7,
+        "maxMessageLength": 900,
+        "forwardImages": false,
+        "replyPerSentence": false,
+        "compactMaxChars": 120,
+        "compactMaxLines": 3,
+        "localHistoryMaxMessages": 12,
+        "persistHistoryEnabled": false,
+        "persistHistoryMax": 50,
+        "approvalEnabled": false,
+        "approvalTimeoutSec": 60,
+        "reactionEnabled": false,
+        "reactionEmojiQq": "66",
+        "reactionEmojiDiscord": "✅",
+        "privateReactionFallbackText": false,
+        "privateReceiptText": "收到"
+      },
+      "peakValley": {
+        "groups": [
+          91
+        ],
+        "mode": "valley",
+        "time": [
+          {
+            "start": "08:00",
+            "end": "10:00",
+            "days": [
+              "Sat",
+              "Sun"
+            ],
+            "mode": "peak",
+            "msg": "专属"
+          },
+          {
+            "start": "13:00",
+            "end": "15:00",
+            "days": [
+              "Mon"
+            ],
+            "mode": "",
+            "msg": ""
+          }
+        ],
+        "peak_msg": "峰 ${time}",
+        "valley_msg": "谷 ${time}",
+        "cmd_peak_msg": "查峰 ${time}",
+        "cmd_valley_msg": "查谷 ${time}"
+      }
+    },
+    "activity": {
+      "probabilityEnabled": false,
+      "idleEnabled": false,
+      "imageRetentionDays": 7,
+      "logRetentionDays": 30,
+      "botUsers": [],
+      "probability": {
+        "baseBps": 300,
+        "minBps": 0,
+        "maxBps": 1000,
+        "cooldownSec": 300,
+        "perMinute": 1,
+        "perHour": 6
+      },
+      "idle": {
+        "probabilityBps": 2500,
+        "windowMinutes": 30,
+        "jitterMinutes": 15,
+        "cooldownSec": 1800,
+        "perHour": 1,
+        "perDay": 3,
+        "quietStart": "00:00",
+        "quietEnd": "09:00",
+        "timeZone": "Asia/Shanghai",
+        "delayMinSec": 30,
+        "delayMaxSec": 80
+      },
+      "words": {
+        "windowHours": 48,
+        "halfLifeHours": 18,
+        "maxBoostPercent": 200
+      },
+      "blockedWords": [],
+      "groups": []
+    },
+    "mcpServers": []
+  },
+  "files": {
+    "management": "{\"version\":1,\"groups\":[11],\"operators\":[21,22],\"discordOperators\":[\"900\"]}",
+    "parentheses": "{\"version\":1,\"groups\":[31]}",
+    "poke": "{\"version\":1,\"groups\":[32]}",
+    "minecraft": "{\"version\":1,\"groups\":[33]}",
+    "modrinth": "{\"version\":1,\"groups\":[34]}",
+    "command": "{\"version\":1,\"groups\":[35,36]}",
+    "bili": "{\"version\":1,\"groups\":[41],\"extra\":{\"follow\":[4001]}}",
+    "github": "{\"version\":2,\"groups\":{\"foo/bar\":[51]}}",
+    "welcome": "{\"version\":1,\"welcomes\":[{\"group\":[61],\"msg\":\"欢迎 ${at}\"}]}",
+    "discord-bridge": "{\"version\":1,\"token\":\"discord-example\",\"bridges\":{\"123#general\":{\"group\":\"71\",\"need_reply\":\"true\",\"need_cmd\":\"false\"}}}",
+    "hermes": "{\"version\":1,\"botName\":\"示例\",\"groups\":[81,82],\"admins\":[83],\"allowedUsers\":[84],\"blockedUsers\":[85],\"requireMention\":false,\"keywordTriggers\":[\"foo\"],\"progressRateLimitSec\":9,\"progressAsImage\":false,\"progressMaxTools\":7,\"maxMessageLength\":900,\"forwardImages\":false,\"replyPerSentence\":false,\"compactMaxChars\":120,\"compactMaxLines\":3,\"localHistoryMaxMessages\":12,\"persistHistoryEnabled\":false,\"persistHistoryMax\":50,\"approvalEnabled\":false,\"approvalTimeoutSec\":60,\"reactionEnabled\":false,\"reactionEmojiQq\":\"66\",\"reactionEmojiDiscord\":\"✅\",\"privateReactionFallbackText\":false,\"privateReceiptText\":\"收到\",\"systemPrompt\":\"\"}",
+    "peak-valley-timer": "{\"groups\":[91],\"mode\":\"valley\",\"time\":[{\"start\":\"08:00\",\"end\":\"10:00\",\"days\":[\"Sat\",\"Sun\"],\"mode\":\"peak\",\"msg\":\"专属\"},{\"start\":\"13:00\",\"end\":\"15:00\",\"days\":[\"Mon\"],\"msg\":\"\"}],\"peak_msg\":\"峰 ${time}\",\"valley_msg\":\"谷 ${time}\",\"cmd_peak_msg\":\"查峰 ${time}\",\"cmd_valley_msg\":\"查谷 ${time}\"}"
+  }
+}

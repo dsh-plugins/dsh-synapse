@@ -13,6 +13,24 @@
 
 启动会话时会自动创建对应工作区目录。若宿主提供工作区注册表（如 DSH `0.2.2+`），插件会将工作区及会话登记到宿主的可见工作区列表。
 
+## 配置结构与迁移
+
+插件配置保存在 `<profile>/config/dsh-synapse/config.json`，按用途分为以下顶层字段：
+
+| 字段 | 内容 |
+| --- | --- |
+| `enabled`、`chatModel`、`reviewModel` | 机器人总开关与两个通道的模型 |
+| `connection` | OneBot HTTP / WebSocket 地址、两个访问令牌、Chrome 路径、User-Agent、令牌参数前缀与日志级别 |
+| `limits` | 新会话权限预设、单轮超时与单轮步骤上限 |
+| `github` | Webhook 审查开关、Secret、Token、允许的仓库列表、评论发布与差异长度上限 |
+| `memory` | 长期记忆开关、检索条数、记忆库容量、嵌入与重排模型、记忆与 Skill 总结规则 |
+| `modules` | 机器人功能：`chat`（对话行为）、`presentation`（进度、审批与表情回应）、`groupFeatures`（按群启用的五个功能）、`management`、`bili`、`github`、`welcome`、`discord`、`peakValley` |
+| `activity`、`mcpServers` | 群聊主动回复策略与 MCP 服务，由自定义面板编辑 |
+
+`feature-config.ts` 中的 `featureFiles` 把 `modules` 翻译为 gugle-chat-bot 读取的功能文件：`chat` 与 `presentation` 按上游字段顺序合并为 `hermes.json`，`groupFeatures` 拆回 `parentheses.json` 等五个文件，峰谷提醒写回 `peak_msg` 等上游键名。`modulesFromFiles` 执行反向翻译，用于「同步聊天命令修改的功能设置」。
+
+`config-migration.ts` 在注册配置前直接读取 `config.json`。检测到平铺布局的旧字段（如 `httpUrl`、`ragEnabled`、`modules.command`）时，逐项搬到上述分组，`repositories` 多行文本拆为 `github.allowedRepositories` 数组，原文件备份为 `<profile>/data/dsh-synapse/config-before-restructure.json`，再以原修订号为前提写入新结构。表单化之前的配置（含 `features`、`mcp`、`botJson` 等字符串字段）先完成同样的搬迁，再解析字符串并合并机器人当前功能文件中由聊天命令写入的设置，备份为 `config-before-forms.json`。已是分组结构的配置不会再次迁移。
+
 ## 原生会话绑定与恢复
 
 - **会话划分**：每个 QQ 群及其桥接的 Discord 频道共享同一个原生会话（`chat:group:<groupId>`），消息内保留发言者身份；QQ 私聊按用户独立绑定（`chat:user:<userId>`）；GitHub 审查按仓库独立绑定（`review:github:<owner>/<repo>`）。
@@ -31,8 +49,8 @@
 ## 混合记忆与子代理总结
 
 - **独立推理进程**：向量嵌入（`Xenova/bge-small-zh-v1.5`）与重排（`Xenova/bge-reranker-base`）运行在通过 `child_process.fork` 启动的独立进程中，避免在 Windows 下与宿主的图片处理组件产生 `sharp` 原生动态库冲突。模型下载直连 Hugging Face 失败时自动回退至 `hf-mirror.com`。
-- **在线推理**：`embeddingModel` 与 `rerankModel` 分别选择 `local` 或 `online`，默认本地。在线模式配置 Base URL、API Key 与模型名称，默认服务地址为 `https://api.siliconflow.cn/v1`；嵌入默认 `BAAI/bge-m3`，重排默认 `BAAI/bge-reranker-v2-m3`。请求遵循 SiliconFlow 的[嵌入接口](https://api-docs.siliconflow.cn/docs/api/embeddings-post)和[重排接口](https://api-docs.siliconflow.cn/docs/api/rerank-post)，通过 Bearer 鉴权，支持取消与 60 秒超时，响应限制为 2 MB。嵌入使用浮点回执，批量请求按 `index` 恢复顺序；重排按文档 `index` 还原分数。在线路径按原文发送文本，只在选用本地模型时启动本地推理进程。
-- **向量索引迁移**：`embeddingModel.dimensions=0` 时采用模型默认维度；服务支持时可指定输出维度（SiliconFlow 的 Qwen3 系列支持此参数）。`sqlite-vec` 支持 1–8192 维向量。索引记录嵌入服务、模型与维度标识；切换模型或维度时按 16 条一批重新计算已有记忆向量，通过宿主日志显示进度，再在单个事务中替换向量表及模型标识。正文、ID、时间、去重和全文索引保留；失败或取消时保留原向量表。嵌入写入与检索串行执行，密钥轮换或单独更换重排模型不会重建向量索引。
+- **在线推理**：`memory.embeddingModel` 与 `memory.rerankModel` 分别选择 `local` 或 `online`，默认本地。在线模式配置 Base URL、API Key 与模型名称，默认服务地址为 `https://api.siliconflow.cn/v1`；嵌入默认 `BAAI/bge-m3`，重排默认 `BAAI/bge-reranker-v2-m3`。请求遵循 SiliconFlow 的[嵌入接口](https://api-docs.siliconflow.cn/docs/api/embeddings-post)和[重排接口](https://api-docs.siliconflow.cn/docs/api/rerank-post)，通过 Bearer 鉴权，支持取消与 60 秒超时，响应限制为 2 MB。嵌入使用浮点回执，批量请求按 `index` 恢复顺序；重排按文档 `index` 还原分数。在线路径按原文发送文本，只在选用本地模型时启动本地推理进程。
+- **向量索引迁移**：`memory.embeddingModel.dimensions=0` 时采用模型默认维度；服务支持时可指定输出维度（SiliconFlow 的 Qwen3 系列支持此参数）。`sqlite-vec` 支持 1–8192 维向量。索引记录嵌入服务、模型与维度标识；切换模型或维度时按 16 条一批重新计算已有记忆向量，通过宿主日志显示进度，再在单个事务中替换向量表及模型标识。正文、ID、时间、去重和全文索引保留；失败或取消时保留原向量表。嵌入写入与检索串行执行，密钥轮换或单独更换重排模型不会重建向量索引。
 - **混合检索**：记忆存储在 `<profile>/data/dsh-synapse/memory.sqlite`，结合 `sqlite-vec` 向量检索与 `FTS5` 分词检索（RRF 融合），可选经过所选重排模型排序。聊天（`chat`）与审查（`review`）通道的记忆严格隔离。在线模式会向所配置的服务发送记忆文本及检索词，密钥通过 loader 的密码字段管理，错误日志只返回状态和本地校验信息。
 - **原生子代理委派**：主模型不直接暴露记忆或 Skill 写入工具，而是通过 `synapse_memory_summarize` 与 `synapse_skill_summarize` 调用宿主 `subagents` 服务（`spawn` 提供方）启动子会话。子会话绑定父会话 ID 并继承当前通道的模型路由，仅挂载对应通道的检索、读取与保存工具（`synapse_memory_*` 或 `synapse_skill_*`）。
 

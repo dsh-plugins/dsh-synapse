@@ -161,7 +161,7 @@ export class Memory {
 
   private checkModel(identity: string, signal: AbortSignal) {
     signal.throwIfAborted();
-    if (embeddingIdentity(this.config().embeddingModel) !== identity) {
+    if (embeddingIdentity(this.config().memory.embeddingModel) !== identity) {
       throw new Error("嵌入模型配置已变更，请重新执行记忆操作");
     }
   }
@@ -210,7 +210,7 @@ export class Memory {
 
   async addMany(items: MemoryItem[], signal?: AbortSignal) {
     return this.serial(async (signal) => {
-      const identity = embeddingIdentity(this.config().embeddingModel),
+      const identity = embeddingIdentity(this.config().memory.embeddingModel),
         ready = [];
       const hashes = new Set<string>();
       for (const item of items) {
@@ -266,7 +266,7 @@ export class Memory {
             .prepare(
               "SELECT id FROM memories ORDER BY id DESC LIMIT -1 OFFSET ?",
             )
-            .all(this.config().maxMemories) as { id: number }[];
+            .all(this.config().memory.maxItems) as { id: number }[];
           for (const { id } of old) {
             this.remove(id);
           }
@@ -283,8 +283,8 @@ export class Memory {
   async search(query, channel, signal?: AbortSignal) {
     return this.serial(async (signal) => {
       channelCheck(channel);
-      const c = this.config();
-      if (!c.ragEnabled) {
+      const c = this.config().memory;
+      if (!c.enabled) {
         return [];
       }
       const identity = embeddingIdentity(c.embeddingModel);
@@ -297,7 +297,7 @@ export class Memory {
         .prepare(
           "SELECT id,distance FROM memory_vec WHERE embedding MATCH ? AND k=? AND channel=? ORDER BY distance",
         )
-        .all(embedding, c.recallK, channel) as { id: number }[];
+        .all(embedding, c.recallCount, channel) as { id: number }[];
       const terms = [
         ...new Set(tokenize(query).split(" ").filter(Boolean)),
       ].slice(0, 64);
@@ -311,7 +311,7 @@ export class Memory {
                 .map((t) => '"' + t.replaceAll('"', '""') + '"')
                 .join(" OR "),
               channel,
-              c.recallK,
+              c.recallCount,
             )
         : [];
       const scores = new Map();
@@ -322,7 +322,7 @@ export class Memory {
       }
       let results = [...scores]
         .sort((a, b) => b[1] - a[1])
-        .slice(0, c.recallK)
+        .slice(0, c.recallCount)
         .map(([id, score]) => ({
           ...(this.db
             .prepare("SELECT * FROM memories WHERE id=?")
@@ -342,7 +342,7 @@ export class Memory {
           .map((x, i) => ({ ...x, score: ranks[i] }))
           .sort((a, b) => b.score - a.score);
       }
-      return results.slice(0, c.memoryK);
+      return results.slice(0, c.contextCount);
     }, signal);
   }
   list(channel, limit = 100) {

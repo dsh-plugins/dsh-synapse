@@ -42,18 +42,19 @@ export class Bot {
       path.join(cwd, "src"),
       { recursive: true },
     );
+    const connection = c.connection;
     await atomicWrite(
       path.join(cwd, "configs", "bot-config.json"),
       JSON.stringify({
-        userAgent: c.userAgent,
-        tokenParams: c.tokenParams,
-        httpUrl: c.httpUrl,
-        wsUrl: c.wsUrl,
-        httpToken: c.httpToken,
-        wsToken: c.wsToken,
-        chromePath: c.chromePath,
-        githubAllowedRepositories: c.repositories.split(/\s+/).filter(Boolean),
-        logLevel: c.logLevel,
+        userAgent: connection.userAgent,
+        tokenParams: connection.tokenParams,
+        httpUrl: connection.httpUrl,
+        wsUrl: connection.wsUrl,
+        httpToken: connection.httpToken,
+        wsToken: connection.wsToken,
+        chromePath: connection.chromePath,
+        githubAllowedRepositories: c.github.allowedRepositories,
+        logLevel: connection.logLevel,
       }),
     );
     // Existing feature files contain live /github subscribe and admin changes.

@@ -77,7 +77,7 @@ async function fixture(t) {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   for (const key of ["embeddingModel", "rerankModel"]) {
-    Object.assign(c[key], {
+    Object.assign(c.memory[key], {
       source: "online",
       baseUrl: `http://127.0.0.1:${server.address().port}/prefix/v1/`,
       apiKey: "example-secret",
@@ -117,7 +117,7 @@ async function fixture(t) {
 async function seedLegacy(f) {
   f.memory.close();
   const c = structuredClone(f.c);
-  c.embeddingModel.source = "local";
+  c.memory.embeddingModel.source = "local";
   const memory = new Memory(
     f.file,
     { embed: async (text) => vector(text, 512) },
@@ -144,11 +144,11 @@ async function seedLegacy(f) {
 test("模型配置默认本地，在线配置校验地址、模型和密钥且错误不包含凭据", () => {
   const c = defaultsFor(template.fields);
   assert.equal(validateConfig(c), c);
-  assert.equal(c.embeddingModel.source, "local");
-  assert.equal(c.rerankModel.source, "local");
-  c.embeddingModel.source = "online";
+  assert.equal(c.memory.embeddingModel.source, "local");
+  assert.equal(c.memory.rerankModel.source, "local");
+  c.memory.embeddingModel.source = "online";
   assert.throws(() => validateConfig(c), /API Key/);
-  c.embeddingModel.apiKey = "example-secret";
+  c.memory.embeddingModel.apiKey = "example-secret";
   assert.equal(validateConfig(c), c);
   for (const baseUrl of [
     "file:///example",
@@ -156,7 +156,7 @@ test("模型配置默认本地，在线配置校验地址、模型和密钥且�
     "https://example.com/v1?key=example-secret",
     "https://example.com/#example-secret",
   ]) {
-    c.embeddingModel.baseUrl = baseUrl;
+    c.memory.embeddingModel.baseUrl = baseUrl;
     assert.throws(
       () => validateConfig(c),
       (error) =>
@@ -164,11 +164,11 @@ test("模型配置默认本地，在线配置校验地址、模型和密钥且�
         /服务地址/.test(error.message),
     );
   }
-  c.embeddingModel.baseUrl = "https://api.siliconflow.cn/v1";
-  c.embeddingModel.model = " ";
+  c.memory.embeddingModel.baseUrl = "https://api.siliconflow.cn/v1";
+  c.memory.embeddingModel.model = " ";
   assert.throws(() => validateConfig(c), /模型名称/);
-  c.embeddingModel.model = "BAAI/bge-m3";
-  c.embeddingModel.dimensions = 8193;
+  c.memory.embeddingModel.model = "BAAI/bge-m3";
+  c.memory.embeddingModel.dimensions = 8193;
   assert.throws(() => validateConfig(c));
 });
 
@@ -196,10 +196,10 @@ test("在线嵌入、批量嵌入与重排使用服务前缀及 Bearer 鉴权，
   assert.ok(!("dimensions" in single.body));
   const ranking = f.requests.find((item) => item.body.query);
   assert.equal(ranking.url, "/prefix/v1/rerank");
-  assert.equal(ranking.body.model, f.c.rerankModel.model);
+  assert.equal(ranking.body.model, f.c.memory.rerankModel.model);
   assert.equal(ranking.body.top_n, 2);
   assert.equal(ranking.body.return_documents, false);
-  f.c.embeddingModel.dimensions = 8;
+  f.c.memory.embeddingModel.dimensions = 8;
   assert.equal((await f.inference.embed("猫")).length, 8);
   assert.equal(f.requests.at(-1).body.dimensions, 8);
   await assert.rejects(access(path.join(f.data, "runtime")), {
@@ -230,15 +230,15 @@ test("嵌入和重排可以分别混用本地进程与在线服务", async (t) =
     new URL("./fixtures/inference-runtime.mjs", import.meta.url),
     path.join(pkg, "index.mjs"),
   );
-  f.c.embeddingModel.source = "local";
+  f.c.memory.embeddingModel.source = "local";
   const local = await f.inference.embed("example");
   assert.notEqual(local[0], process.pid);
   assert.deepEqual(await f.inference.rerank("example", ["a", "b"]), [
     1 / 3,
     2 / 3,
   ]);
-  f.c.embeddingModel.source = "online";
-  f.c.rerankModel.source = "local";
+  f.c.memory.embeddingModel.source = "online";
+  f.c.memory.rerankModel.source = "local";
   assert.deepEqual(await f.inference.embed("猫"), vector("猫", 4));
   const ranks = await f.inference.rerank("example", ["a", "aa"]);
   assert.ok(ranks[0] < ranks[1]);
@@ -277,12 +277,12 @@ test("在线接口的 HTTP、JSON、响应大小和向量错误均明确返回�
     );
     await assert.rejects(f.inference.embed("猫"), /向量|索引/);
   }
-  f.c.embeddingModel.dimensions = 8;
+  f.c.memory.embeddingModel.dimensions = 8;
   f.setHandler((_payload, response) =>
     response.end(JSON.stringify({ data: [{ index: 0, embedding: [1, 0] }] })),
   );
   await assert.rejects(f.inference.embed("猫"), /维度/);
-  f.c.embeddingModel.dimensions = 0;
+  f.c.memory.embeddingModel.dimensions = 0;
   for (const data of [
     [
       { index: 0, embedding: [1, 0] },
@@ -405,8 +405,8 @@ test(
 
 test("旧 512 维索引切换在线 1024 维后保留正文、ID 和通道，重启及密钥轮换复用新索引", async (t) => {
   const f = await fixture(t);
-  f.c.embeddingModel.model = "Qwen/Qwen3-Embedding-0.6B";
-  f.c.embeddingModel.dimensions = 1024;
+  f.c.memory.embeddingModel.model = "Qwen/Qwen3-Embedding-0.6B";
+  f.c.memory.embeddingModel.dimensions = 1024;
   const original = await seedLegacy(f);
   const result = await f.memory.search("猫", "chat");
   assert.equal(result[0].text, "猫喜欢吃鱼");
@@ -428,7 +428,7 @@ test("旧 512 维索引切换在线 1024 维后保留正文、ID 和通道，重
   assert.equal(batches(), 1);
   f.memory.close();
   f.memory = new Memory(f.file, f.inference, () => f.c);
-  f.c.embeddingModel.apiKey = "example-rotated-key";
+  f.c.memory.embeddingModel.apiKey = "example-rotated-key";
   await f.memory.search("猫", "chat");
   assert.equal(batches(), 1);
   assert.equal(
@@ -439,10 +439,10 @@ test("旧 512 维索引切换在线 1024 维后保留正文、ID 和通道，重
     f.memory.db.prepare("SELECT * FROM memory_index").get(),
   );
   assert.doesNotMatch(metadata, /example-secret|example-rotated-key/);
-  f.c.embeddingModel.model = "example-v2";
+  f.c.memory.embeddingModel.model = "example-v2";
   await f.memory.search("猫", "chat");
   assert.equal(batches(), 2);
-  f.c.embeddingModel.dimensions = 8;
+  f.c.memory.embeddingModel.dimensions = 8;
   await f.memory.search("猫", "chat");
   assert.equal(batches(), 3);
   assert.equal(
@@ -450,7 +450,7 @@ test("旧 512 维索引切换在线 1024 维后保留正文、ID 和通道，重
     8,
   );
   const local = structuredClone(f.c);
-  local.embeddingModel.source = "local";
+  local.memory.embeddingModel.source = "local";
   f.memory.close();
   f.memory = new Memory(
     f.file,
@@ -503,7 +503,7 @@ test("重建失败保持旧索引和记忆，恢复服务后并发写入与检�
   assert.equal(second.duplicates, 1);
   assert.equal(results.length, 2);
   assert.ok(results.every((item) => item.channel === "chat"));
-  f.c.reranker = true;
+  f.c.memory.reranker = true;
   const ranked = await f.memory.search("猫", "chat");
   const request = f.requests.at(-1);
   assert.equal(request.url, "/prefix/v1/rerank");
@@ -562,7 +562,7 @@ test(
     );
     f.setHandler((payload, response, respond) => {
       if (Array.isArray(payload.input)) {
-        f.c.embeddingModel.model = "example-changed";
+        f.c.memory.embeddingModel.model = "example-changed";
       }
       respond(payload, response);
     });

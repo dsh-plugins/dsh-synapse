@@ -16,7 +16,8 @@ for (const legacySubagents of [false, true]) {
     const home = await mkdtemp(path.join(os.tmpdir(), "synapse-learning-"));
     const paths = { home, profile: home, data: path.join(home, "data"), skills: path.join(home, "skills") };
     await mkdir(paths.data);
-    const c = { ...defaultsFor(template.fields), memoryPrompt: "记住长期偏好", skillPrompt: "总结验证过的步骤" };
+    const c = defaultsFor(template.fields);
+    Object.assign(c.memory, { memoryPrompt: "记住长期偏好", skillPrompt: "总结验证过的步骤" });
     const memory = new Memory(":memory:", { embed: async () => [1, ...Array(511).fill(0)] }, () => c);
     const skills = new SkillStore(paths);
     const prompts = [], events = [];
@@ -69,8 +70,8 @@ for (const legacySubagents of [false, true]) {
     assert.equal(host.listenerCount("agent/created"), 0);
     assert.equal(host.listenerCount("subagent/end"), 0);
     assert(events.includes("tool.completed"));
-    c.memoryPrompt = "更新后的记忆要求";
-    c.skillPrompt = "更新后的 Skill 要求";
+    c.memory.memoryPrompt = "更新后的记忆要求";
+    c.memory.skillPrompt = "更新后的 Skill 要求";
     const context = await agent.context("example", "chat");
     assert.match(context, /更新后的记忆要求/);
     assert.match(context, /更新后的 Skill 要求/);
@@ -94,14 +95,14 @@ test("记忆与 Skill 写入遵守开关、取消和通道隔离", async (t) => 
   await assert.rejects(call("synapse_memory_save", { text: "取消后不写入" }, aborted), /abort/i);
   await assert.rejects(call("synapse_skill_save", { name: "auto-review-example", content: "取消后不写入" }, aborted), /abort/i);
   assert.equal((await skills.list()).length, 0);
-  c.learnMemory = false;
-  c.learnSkills = false;
+  c.memory.learnMemory = false;
+  c.memory.learnSkills = false;
   await assert.rejects(call("synapse_memory_save", { text: "已关闭" }), /已关闭/);
   await assert.rejects(call("synapse_skill_save", { name: "auto-review-example", content: "已关闭" }), /已关闭/);
   const disabled = learningTools(() => c, memory, skills, "review");
   assert(disabled.some((tool) => tool.name === "synapse_memory_search"));
   assert(!disabled.some((tool) => tool.name.endsWith("_save")));
-  c.ragEnabled = false;
+  c.memory.enabled = false;
   assert(!learningTools(() => c, memory, skills, "review").some((tool) => tool.name.startsWith("synapse_memory_")));
 });
 
@@ -153,7 +154,7 @@ test("总结失败、服务不可用与开关变更均返回工具错误，主�
     if (scenario !== "闲聊") {
       const tool = tools.find((item) => item.name === "synapse_memory_summarize");
       if (scenario === "关闭功能") {
-        c.learnMemory = false;
+        c.memory.learnMemory = false;
       }
       await assert.rejects(tool.execute({ evidence: "已核实的重要事项" }, { signal }), /未完成|不可用|已关闭|启动失败/);
     }

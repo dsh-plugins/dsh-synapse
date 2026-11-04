@@ -99,7 +99,7 @@ test("every new Synapse session uses the selected native permission preset befor
   const host = hostFixture(async ({ options }) => {
     const applied = host.permissionWrites.at(-1);
     assert.equal(applied.sessionId, options.sessionId);
-    assert.equal(applied.preset, c.sessionPermission);
+    assert.equal(applied.preset, c.limits.sessionPermission);
     return "done";
   });
   const harness = new Harness(
@@ -110,7 +110,7 @@ test("every new Synapse session uses the selected native permission preset befor
   );
   try {
     for (const preset of host.permissions.names) {
-      c.sessionPermission = preset;
+      c.limits.sessionPermission = preset;
       for (const key of [
         "chat:group:123",
         "chat:user:456",
@@ -154,7 +154,7 @@ test("permission changes affect new/reset sessions while residents and persisted
   try {
     await run();
     const id = host.created[0].agent.id;
-    c.sessionPermission = "workspace-write";
+    c.limits.sessionPermission = "workspace-write";
     await run();
     assert.deepEqual(host.permissionWrites, [
       { sessionId: id, preset: "read-only" },
@@ -163,7 +163,7 @@ test("permission changes affect new/reset sessions while residents and persisted
     assert.equal(host.permissionWrites.at(-1).preset, "workspace-write");
     await harness.close();
     harness = create();
-    c.sessionPermission = "danger-full-access";
+    c.limits.sessionPermission = "danger-full-access";
     await run();
     assert.equal(host.resumed[0].agent.id, id);
     assert.equal(
@@ -181,8 +181,9 @@ test("permission changes affect new/reset sessions while residents and persisted
 });
 
 test("unavailable Auto integration or native permission writer blocks new sessions without falling back", async () => {
-  const c = { ...defaultsFor(template.fields), sessionPermission: "auto" },
+  const c = defaultsFor(template.fields),
     host = hostFixture();
+  c.limits.sessionPermission = "auto";
   host.permissions.names = host.permissions.names.filter(
     (name) => name !== "auto",
   );

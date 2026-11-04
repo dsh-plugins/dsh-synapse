@@ -63,165 +63,110 @@ export const select = (
   default: value,
 });
 
+export const GROUP_FEATURES = ["parentheses", "poke", "minecraft", "modrinth", "command"];
+const HERMES_KEYS = [
+  "botName", "groups", "admins", "allowedUsers", "blockedUsers", "requireMention", "keywordTriggers",
+  "progressRateLimitSec", "progressAsImage", "progressMaxTools", "maxMessageLength", "forwardImages",
+  "replyPerSentence", "compactMaxChars", "compactMaxLines", "localHistoryMaxMessages", "persistHistoryEnabled",
+  "persistHistoryMax", "approvalEnabled", "approvalTimeoutSec", "reactionEnabled", "reactionEmojiQq",
+  "reactionEmojiDiscord", "privateReactionFallbackText", "privateReceiptText",
+];
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const COLLAPSED: CollapseOptions = { collapsible: true, defaultCollapsed: true };
+/** 回复呈现从聊天配置拆出，写入 hermes.json 时再合并回去。 */
+export const presentationFields: ConfigField[] = [
+  { ...num("progressRateLimitSec", "进度更新最小间隔（秒）", 15, 0), description: "两次进度卡片之间至少间隔这么久，0 表示不限制。" },
+  flag("progressAsImage", "进度使用图片卡片", true),
+  num("progressMaxTools", "进度卡片最多显示的工具数", 12),
+  flag("approvalEnabled", "在聊天中显示工具审批", true),
+  { ...num("approvalTimeoutSec", "审批超时自动拒绝（秒）", 300, 0), description: "0 表示一直等待，不自动拒绝。" },
+  flag("reactionEnabled", "处理期间给消息加表情回应", true),
+  { ...text("reactionEmojiQq", "QQ 回应表情 ID", "76"), description: "NapCat set_msg_emoji_like 使用的表情 ID，76 为「👍 强」。" },
+  text("reactionEmojiDiscord", "Discord 回应表情", "👀"),
+  flag("privateReactionFallbackText", "私聊表情失败时改发文字回执", true),
+  text("privateReceiptText", "私聊文字回执", "🤔 收到，正在思考…"),
+];
+const groupFeatureFields: ConfigField[] = [
+  ["parentheses", "括号匹配", "消息里有未闭合的括号或引号时，机器人补上缺失的右括号，或指出不匹配的位置。"],
+  ["poke", "戳一戳回应", "21:00 到次日 08:00 期间戳机器人，会收到一句回复并被禁言 1–5 分钟。"],
+  ["minecraft", "Minecraft 版本推送", "Minecraft 发布新正式版或快照时推送到这些群。"],
+  ["modrinth", "Modrinth 模组更新推送", "跟踪的 Modrinth 模组发布新版本时推送到这些群。当前内置机器人没有启用任何模组跟踪，填写后暂不会收到推送。"],
+  ["command", "聊天命令", "响应以 / 开头的命令，例如 /help；未加入的群不处理命令。"],
+].map(([key, label, description]) => ({ ...ids(key, label), description }));
 export const moduleFields: ConfigField[] = [
+  object("chat", "对话行为", [
+    text("botName", "机器人展示名称", "小喵"),
+    ids("groups", "启用对话的 QQ 群"),
+    ids("admins", "对话管理员 QQ"),
+    { ...ids("allowedUsers", "允许对话的 QQ 用户"), description: "留空表示所有人都可以对话。" },
+    ids("blockedUsers", "AI 忽略的 QQ 用户"),
+    { ...flag("requireMention", "群聊需要 @机器人 才回复", true), description: "关闭后，群里的普通消息也会进入回复判定。" },
+    { ...strings("keywordTriggers", "触发关键词"), description: "消息包含其中任一关键词时触发回复，不区分大小写。" },
+    { ...num("maxMessageLength", "单条消息最大字符数", 1200, 1), description: "超过后拆成多条发送。" },
+    flag("forwardImages", "把图片交给 DSH 识别", true),
+    flag("replyPerSentence", "按句子逐条发送回复", true),
+    { ...num("compactMaxChars", "合并转发的字符阈值", 300, 0), description: "同一 QQ 会话排队待发的消息合并后超过该字符数，就改用聊天记录（合并转发）发送；群聊按句发送时，单句超过该字符数也会这样发送。0 表示不按字符数判断。" },
+    { ...num("compactMaxLines", "合并转发的行数阈值", 5, 0), description: "规则同上，按行数判断。0 表示不按行数判断。" },
+    { ...num("localHistoryMaxMessages", "新会话导入的历史消息数", 24, 0), description: "第一次为该会话创建 DSH 对话时，导入多少条之前保存的聊天记录；0 表示不导入。" },
+    flag("persistHistoryEnabled", "保存会话历史", true),
+    num("persistHistoryMax", "历史保留的消息数", 100),
+  ], COLLAPSED),
+  object("presentation", "回复呈现", presentationFields, COLLAPSED),
+  object("groupFeatures", "按群启用的功能", groupFeatureFields, COLLAPSED),
   object("management", "群管理与管理员", [
-    ids(),
-    ids("operators", "QQ 管理员"),
+    ids("groups", "启用群管理的 QQ 群"),
+    ids("operators", "群管理员 QQ"),
     strings("discordOperators", "Discord 管理员 ID"),
   ], COLLAPSED),
-  ...[
-    ["parentheses", "括号匹配"],
-    ["poke", "戳一戳"],
-    ["minecraft", "Minecraft 查询"],
-    ["modrinth", "Modrinth 查询"],
-    ["command", "命令入口"],
-  ].map(([id, label]) => object(id, label, [ids()], COLLAPSED)),
-  object("bili", "B 站视频与订阅", [ids(), ids("follow", "关注的 B 站 UID")], COLLAPSED),
+  object("bili", "B 站订阅（保留）", [
+    { ...ids("groups", "推送订阅的 QQ 群"), description: "当前内置机器人不读取这一项，B 站视频卡片对所有群生效。保留它只为兼容旧配置文件。" },
+    ids("follow", "关注的 B 站 UID"),
+  ], COLLAPSED),
   object("github", "GitHub 仓库通知", [
-    array(
-      "subscriptions",
-      "仓库订阅",
-      object("item", "订阅", [text("repository", "owner/repo"), ids()]),
-    ),
+    array("subscriptions", "仓库订阅", object("item", "订阅", [
+      { ...text("repository", "仓库"), description: "格式为 owner/repo，仓库动态会推送到下面的群。" },
+      ids("groups", "推送的 QQ 群"),
+    ])),
   ], COLLAPSED),
   object("welcome", "新人欢迎", [
-    array(
-      "welcomes",
-      "欢迎规则",
-      object("item", "规则", [
-        ids("group", "适用 QQ 群"),
-        text(
-          "msg",
-          "欢迎语（${at} 表示新成员）",
-          "欢迎 ${at} 加入群聊",
-          "textarea",
-        ),
-      ]),
-    ),
+    array("welcomes", "欢迎规则", object("item", "规则", [
+      ids("group", "适用的 QQ 群"),
+      { ...text("msg", "欢迎语", "欢迎 ${at} 加入群聊", "textarea"), description: "${at} 会替换为新成员的 @。" },
+    ])),
   ], COLLAPSED),
   object("discord", "Discord 跨平台桥接", [
     text("token", "Discord Bot Token", "", "password"),
-    array(
-      "bridges",
-      "频道与 QQ 群映射",
-      object("item", "桥接", [
-        text("guildId", "Discord 服务器 ID"),
-        text("channelName", "Discord 频道名称"),
-        text("group", "QQ 群号"),
-        flag("needReply", "QQ → Discord 仅转发对桥消息的回复"),
-        flag("needCmd", "双向仅转发 /send 与桥消息回复"),
-      ]),
-    ),
-  ], COLLAPSED),
-  object("chat", "QQ / Discord 消息行为", [
-    text("botName", "机器人展示名称", "小喵"),
-    ids(),
-    ids("admins", "对话管理员 QQ"),
-    ids("allowedUsers", "允许对话的 QQ 用户（空为全部）"),
-    ids("blockedUsers", "AI 忽略名单（QQ 用户）"),
-    flag("requireMention", "群聊需要 @机器人", true),
-    strings("keywordTriggers", "触发关键词"),
-    num("progressRateLimitSec", "进度更新最小间隔（秒）", 15),
-    flag("progressAsImage", "进度使用图片卡片", true),
-    num("progressMaxTools", "进度卡片最多工具数", 12),
-    num("maxMessageLength", "单条消息最大字符数", 1200, 1),
-    flag("forwardImages", "转发图片到 DSH", true),
-    flag("replyPerSentence", "逐句发送回复", true),
-    { ...num("compactMaxChars", "合并转发字符阈值（0 关闭）", 300), description: "QQ 会话待发消息合并后超过此字符数时，打包为聊天记录；0 关闭此阈值。" },
-    { ...num("compactMaxLines", "合并转发行数阈值（0 关闭）", 5), description: "QQ 会话待发消息合并后超过此行数时，打包为聊天记录；0 关闭此阈值。" },
-    num("localHistoryMaxMessages", "首次创建 DSH 会话时导入的旧历史条数", 24),
-    flag("persistHistoryEnabled", "保存会话历史", true),
-    num("persistHistoryMax", "历史保留消息数", 100),
-    flag("approvalEnabled", "在聊天通道显示 DSH 审批", true),
-    num("approvalTimeoutSec", "审批超时自动拒绝（秒，0 不超时）", 300),
-    flag("reactionEnabled", "处理期间使用表情回应", true),
-    text("reactionEmojiQq", "QQ 回应表情 ID", "76"),
-    text("reactionEmojiDiscord", "Discord 回应表情", "👀"),
-    flag("privateReactionFallbackText", "私聊表情失败时发送文字回执", true),
-    text("privateReceiptText", "私聊文字回执", "🤔 收到，正在思考…"),
+    array("bridges", "频道与 QQ 群的对应关系", object("item", "桥接", [
+      text("guildId", "Discord 服务器 ID"),
+      text("channelName", "Discord 频道名称"),
+      text("group", "QQ 群号"),
+      { ...flag("needReply", "QQ 到 Discord 只转发对桥接消息的回复"), description: "开启后，QQ 里的普通消息不再发到 Discord。" },
+      { ...flag("needCmd", "双向都只转发 /send 和对桥接消息的回复"), description: "开启后，两边的普通消息都不再转发。" },
+    ])),
   ], COLLAPSED),
   object("peakValley", "峰谷时段提醒", [
-    ids(),
-    select("mode", "默认时段类型", [
-      ["peak", "峰"],
-      ["valley", "谷"],
-    ]),
+    ids("groups", "启用提醒的 QQ 群"),
+    select("mode", "默认时段类型", [["peak", "峰"], ["valley", "谷"]]),
     {
-      ...array(
-        "time",
-        "时段",
-        object("item", "时段", [
-          {
-            ...text("start", "开始时间", "09:00"),
-            pattern: "^([01]?\\d|2[0-3]):[0-5]\\d$",
-          },
-          {
-            ...text("end", "结束时间", "12:00"),
-            pattern: "^([01]?\\d|2[0-3]):[0-5]\\d$",
-          },
-          {
-            type: "multiselect",
-            key: "days",
-            label: "重复日期",
-            default: days.slice(0, 5),
-            options: days.map((value, i) => ({
-              value,
-              label: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
-                i
-              ],
-            })),
-          },
-          select("mode", "时段类型", [
-            ["", "使用默认类型"],
-            ["peak", "峰"],
-            ["valley", "谷"],
-          ]),
-          text("msg", "此时段提醒（留空使用默认）", "", "textarea"),
-        ]),
-      ),
+      ...array("time", "时段", object("item", "时段", [
+        { ...text("start", "开始时间", "09:00"), pattern: "^([01]?\\d|2[0-3]):[0-5]\\d$", description: "24 小时制，如 09:00。" },
+        { ...text("end", "结束时间", "12:00"), pattern: "^([01]?\\d|2[0-3]):[0-5]\\d$" },
+        {
+          type: "multiselect", key: "days", label: "重复的星期", default: days.slice(0, 5),
+          options: days.map((value, i) => ({ value, label: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][i] })),
+        },
+        { ...select("mode", "此时段的类型", [["", "跟随默认类型"], ["peak", "峰"], ["valley", "谷"]]), description: "选「跟随默认类型」时使用上面的默认时段类型。" },
+        { ...text("msg", "此时段单独的提醒", "", "textarea"), description: "填写后，时段开始和结束都发送这一条。留空时，开始发送本类型的默认提醒，结束发送相反类型的默认提醒。${time} 会替换为当前时间。" },
+      ])),
       default: [
-        {
-          start: "09:00",
-          end: "12:00",
-          days: days.slice(0, 5),
-          mode: "",
-          msg: "",
-        },
-        {
-          start: "14:00",
-          end: "18:00",
-          days: days.slice(0, 5),
-          mode: "",
-          msg: "",
-        },
+        { start: "09:00", end: "12:00", days: days.slice(0, 5), mode: "", msg: "" },
+        { start: "14:00", end: "18:00", days: days.slice(0, 5), mode: "", msg: "" },
       ],
     },
-    text(
-      "peak_msg",
-      "峰时段提醒",
-      "梁文峰时间到！\n当前时间是${time}",
-      "textarea",
-    ),
-    text(
-      "valley_msg",
-      "谷时段提醒",
-      "梁文谷时间到！\n当前时间是${time}",
-      "textarea",
-    ),
-    text(
-      "cmd_peak_msg",
-      "峰时段查询回复",
-      "当前时间是${time}，梁文峰时间！",
-      "textarea",
-    ),
-    text(
-      "cmd_valley_msg",
-      "谷时段查询回复",
-      "当前时间是${time}，梁文谷时间！",
-      "textarea",
-    ),
+    { ...text("peakMessage", "峰时段提醒", "梁文峰时间到！\n当前时间是${time}", "textarea"), description: "${time} 会替换为当前时间。" },
+    { ...text("valleyMessage", "谷时段提醒", "梁文谷时间到！\n当前时间是${time}", "textarea"), description: "${time} 会替换为当前时间。" },
+    text("peakReply", "查询时的峰时段回复", "当前时间是${time}，梁文峰时间！", "textarea"),
+    text("valleyReply", "查询时的谷时段回复", "当前时间是${time}，梁文谷时间！", "textarea"),
   ], COLLAPSED),
 ];
 
@@ -258,34 +203,22 @@ export const mcpServerItem = object("item", "服务", [
   strings("allowedTools", "允许自动调用的工具名称"),
 ]);
 
-/** Only this boundary translates the visual form to the upstream file formats. */
+/** 配置表单与 gugle-chat-bot 功能文件之间的唯一翻译层，文件字段名保持上游格式。 */
 export function featureFiles(c: SynapseConfig): { id: string; value: any }[] {
   const m = c.modules;
+  // 键顺序与上游 hermes.json 一致，bot.ts 依赖序列化结果判断表单是否修改过。
+  const chatFile: Record<string, unknown> = { version: 1 };
+  for (const key of HERMES_KEYS) {
+    chatFile[key] = key in m.chat ? m.chat[key] : m.presentation[key];
+  }
+  chatFile.systemPrompt = "";
   return [
-    ...[
-      "management",
-      "parentheses",
-      "poke",
-      "minecraft",
-      "modrinth",
-      "command",
-    ].map((id) => ({ id, value: { version: 1, ...m[id] } })),
-    {
-      id: "bili",
-      value: {
-        version: 1,
-        groups: m.bili.groups,
-        extra: { follow: m.bili.follow },
-      },
-    },
+    { id: "management", value: { version: 1, ...m.management } },
+    ...GROUP_FEATURES.map((id) => ({ id, value: { version: 1, groups: m.groupFeatures[id] } })),
+    { id: "bili", value: { version: 1, groups: m.bili.groups, extra: { follow: m.bili.follow } } },
     {
       id: "github",
-      value: {
-        version: 2,
-        groups: Object.fromEntries(
-          m.github.subscriptions.map((s) => [s.repository, s.groups]),
-        ),
-      },
+      value: { version: 2, groups: Object.fromEntries(m.github.subscriptions.map((s) => [s.repository, s.groups])) },
     },
     { id: "welcome", value: { version: 1, welcomes: m.welcome.welcomes } },
     {
@@ -293,27 +226,23 @@ export function featureFiles(c: SynapseConfig): { id: string; value: any }[] {
       value: {
         version: 1,
         token: m.discord.token,
-        bridges: Object.fromEntries(
-          m.discord.bridges.map((b) => [
-            `${b.guildId}#${b.channelName}`,
-            {
-              group: b.group,
-              need_reply: String(b.needReply),
-              need_cmd: String(b.needCmd),
-            },
-          ]),
-        ),
+        bridges: Object.fromEntries(m.discord.bridges.map((b) => [
+          `${b.guildId}#${b.channelName}`,
+          { group: b.group, need_reply: String(b.needReply), need_cmd: String(b.needCmd) },
+        ])),
       },
     },
-    { id: "hermes", value: { version: 1, ...m.chat, systemPrompt: "" } },
+    { id: "hermes", value: chatFile },
     {
       id: "peak-valley-timer",
       value: {
-        ...m.peakValley,
-        time: m.peakValley.time.map((t) => ({
-          ...t,
-          ...(t.mode ? {} : { mode: undefined }),
-        })),
+        groups: m.peakValley.groups,
+        mode: m.peakValley.mode,
+        time: m.peakValley.time.map((t) => ({ ...t, ...(t.mode ? {} : { mode: undefined }) })),
+        peak_msg: m.peakValley.peakMessage,
+        valley_msg: m.peakValley.valleyMessage,
+        cmd_peak_msg: m.peakValley.peakReply,
+        cmd_valley_msg: m.peakValley.valleyReply,
       },
     },
   ];
@@ -325,17 +254,10 @@ export function modulesFromFiles(
 ): SynapseConfig["modules"] {
   const m = structuredClone(base);
   for (const { id, value: v } of files) {
-    if (
-      [
-        "management",
-        "parentheses",
-        "poke",
-        "minecraft",
-        "modrinth",
-        "command",
-      ].includes(id)
-    )
-      m[id] = { ...m[id], ...v };
+    if (id === "management")
+      m.management = { ...m.management, ...v };
+    else if (GROUP_FEATURES.includes(id))
+      m.groupFeatures = { ...m.groupFeatures, [id]: v.groups ?? m.groupFeatures[id] };
     else if (id === "bili")
       m.bili = { groups: v.groups ?? [], follow: v.extra?.follow ?? [] };
     else if (id === "github")
@@ -367,13 +289,27 @@ export function modulesFromFiles(
       };
     else if (id === "hermes") {
       const { apiUrl, apiKey, systemPrompt, version, ...behavior } = v;
+      const presentation = {};
+      for (const field of presentationFields) {
+        if (field.key! in behavior) {
+          presentation[field.key!] = behavior[field.key!];
+          delete behavior[field.key!];
+        }
+      }
       m.chat = { ...m.chat, ...behavior };
-    } else if (id === "peak-valley-timer")
+      m.presentation = { ...m.presentation, ...presentation };
+    } else if (id === "peak-valley-timer") {
+      const { peak_msg, valley_msg, cmd_peak_msg, cmd_valley_msg, ...rest } = v;
       m.peakValley = {
         ...m.peakValley,
-        ...v,
+        ...rest,
+        ...(peak_msg === undefined ? {} : { peakMessage: peak_msg }),
+        ...(valley_msg === undefined ? {} : { valleyMessage: valley_msg }),
+        ...(cmd_peak_msg === undefined ? {} : { peakReply: cmd_peak_msg }),
+        ...(cmd_valley_msg === undefined ? {} : { valleyReply: cmd_valley_msg }),
         time: (v.time ?? m.peakValley.time).map(timeRange),
       };
+    }
   }
   return m;
 }

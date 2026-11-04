@@ -51,7 +51,7 @@ test("功能弹窗的嵌套字段可新增、编辑和删除并保留其他配�
   click(management(), "新增");
   edit("synapse-modules-management.groups.0", "659356928");
   assert.deepEqual(draft.management.groups, [659356928]);
-  assert.deepEqual(draft.minecraft, initial.minecraft);
+  assert.deepEqual(draft.groupFeatures, initial.groupFeatures);
   click(management(), "群管理与管理员");
   const collapsed = management();
   assert.equal(collapsed.getAttribute("data-expanded"), "false");
@@ -65,7 +65,7 @@ test("功能弹窗的嵌套字段可新增、编辑和删除并保留其他配�
   const github = [...document.querySelectorAll("fieldset")].find((node) => node.querySelector("legend")?.textContent === "GitHub 仓库通知");
   click(github, "新增");
   edit("synapse-modules-github.subscriptions.0.repository", "Anvil-Dev/AnvilLib");
-  const groupsArray = [...github.querySelectorAll(".synapse-config-item")].find((node) => node.querySelector("label")?.textContent === "启用的 QQ 群");
+  const groupsArray = [...github.querySelectorAll(".synapse-config-item")].find((node) => node.querySelector("label")?.textContent === "推送的 QQ 群");
   click(groupsArray, "新增");
   edit("synapse-modules-github.subscriptions.0.groups.0", "659356928");
   assert.deepEqual(draft.github.subscriptions, [{ repository: "Anvil-Dev/AnvilLib", groups: [659356928] }]);

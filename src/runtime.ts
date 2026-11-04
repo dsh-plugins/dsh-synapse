@@ -199,12 +199,12 @@ export class Inference {
   }
   async embed(text: string, query = false, signal?: AbortSignal) {
     const combined = this.requestSignal(signal);
-    const model = this.config?.().embeddingModel;
+    const model = this.config?.().memory.embeddingModel;
     return model?.source === "online" ? onlineEmbed(model, text, combined) : abortable(this.call("embed", { text, query }), combined);
   }
   async embedMany(texts: string[], signal?: AbortSignal) {
     const combined = this.requestSignal(signal);
-    const model = this.config?.().embeddingModel;
+    const model = this.config?.().memory.embeddingModel;
     if (model?.source === "online") { return onlineEmbedMany(model, texts, combined); }
     const vectors: number[][] = [];
     for (const text of texts) { vectors.push(await this.embed(text, false, combined)); }
@@ -212,7 +212,7 @@ export class Inference {
   }
   async rerank(query: string, documents: string[], signal?: AbortSignal) {
     const combined = this.requestSignal(signal);
-    const model = this.config?.().rerankModel;
+    const model = this.config?.().memory.rerankModel;
     return model?.source === "online" ? onlineRerank(model, query, documents, combined) : abortable(this.call("rerank", { query, documents }), combined);
   }
   close() {

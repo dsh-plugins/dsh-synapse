@@ -88,7 +88,7 @@ export async function createService(
     await bot.start();
     activity.start();
     void reviews.drain();
-    if (c.enabled && c.ragEnabled)
+    if (c.enabled && c.memory.enabled)
       void inference.embed("初始化记忆模型").catch(onError);
   } catch (e) {
     await close();
@@ -220,7 +220,7 @@ export async function apply(ctx: SynapseContext) {
           if (action === "mcp/tools")
             return json(res, await service.mcp.list(data.name));
           if (action === "memory/import") {
-            if (!service.config().ragEnabled) throw new Error("请先启用 RAG");
+            if (!service.config().memory.enabled) throw new Error("请先启用长期记忆");
             const items = parseHermes(data.markdown, data.channel);
             return json(
               res,

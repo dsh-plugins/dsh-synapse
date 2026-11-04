@@ -197,7 +197,7 @@ export class Gateway {
           controller.signal,
           emit,
           data.instructions || "",
-          c.modules.chat.approvalEnabled
+          c.modules.presentation.approvalEnabled
             ? (request) => this.askApproval(run, request, emit)
             : undefined,
           sessionKey,
@@ -276,7 +276,7 @@ export class Gateway {
           const abort = () => finish("cancelled");
           run.approval = finish;
           signal.addEventListener("abort", abort, { once: true });
-          const seconds = this.config().modules.chat.approvalTimeoutSec;
+          const seconds = this.config().modules.presentation.approvalTimeoutSec;
           if (seconds > 0)
             timer = setTimeout(() => finish("rejected"), seconds * 1000);
           emit("approval.request", {

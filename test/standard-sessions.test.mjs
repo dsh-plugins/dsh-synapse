@@ -14,7 +14,8 @@ async function fixture(t, execute = async () => "done") {
   const profile = path.join(home, "profiles", "example");
   await mkdir(profile, { recursive: true });
   const paths = { home, profile, data: path.join(profile, "data"), skills: path.join(profile, "skills") };
-  const host = hostFixture(execute), config = { ...defaultsFor(template.fields), ragEnabled: false, learnMemory: false, learnSkills: false };
+  const host = hostFixture(execute), config = defaultsFor(template.fields);
+  Object.assign(config.memory, { enabled: false, learnMemory: false, learnSkills: false });
   const create = () => new Agent({ loader: host.loader, paths, config: () => config, memory: {}, skills: { retrieve: async () => [] }, mcp: { available: async () => [] } });
   let agent = create();
   t.after(async () => { await agent.close(); await rm(home, { recursive: true, force: true }); });

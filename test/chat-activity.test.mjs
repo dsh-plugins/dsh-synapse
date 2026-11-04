@@ -32,7 +32,7 @@ async function fixture(t, { cloud, images, random } = {}) {
   const data = path.join(root, "data", "dsh-synapse");
   await mkdir(data, { recursive: true });
   const c = defaultsFor(template.fields);
-  c.enabled = true; c.ragEnabled = false; c.learnMemory = false; c.learnSkills = false; c.modules.chat.groups = [123, 456];
+  c.enabled = true; Object.assign(c.memory, { enabled: false, learnMemory: false, learnSkills: false }); c.modules.chat.groups = [123, 456];
   let clock = epoch;
   const state = new ChatState(path.join(data, "chat-state.sqlite"));
   const paths = { home: root, profile: root, data, skills: path.join(root, "skills") };
@@ -452,7 +452,7 @@ test("引用与聊天记录中的图片异步展开并使用本地路径，词�
     const original = { sender: { user_id: 5, nickname: "引用作者" }, message: [{ type: "text", data: { text: "引用正文" } }, { type: "image", data: { file: png } }] };
     res.end(JSON.stringify({ retcode: 0, data: req.url === "/get_msg" ? original : { messages: [original] } }));
   }); server.listen(0, "127.0.0.1"); await once(server, "listening");
-  t.after(() => new Promise(resolve => server.close(resolve))); f.c.httpUrl = `http://127.0.0.1:${server.address().port}`;
+  t.after(() => new Promise(resolve => server.close(resolve))); f.c.connection.httpUrl = `http://127.0.0.1:${server.address().port}`;
   const trigger = await f.activity.observe(event(1, "", "123", "1", { mentioned: true, message: [{ type: "text", data: { text: "本条发言" } }, { type: "reply", data: { id: 2 } }, { type: "forward", data: { id: 3 } }] }));
   const run = await f.activity.submission("123", trigger.seq);
   assert.match(run.input, /本条发言/); assert.match(run.input, /引用正文/); assert.match(run.input, /[a-f0-9]{64}\.png/);
@@ -552,7 +552,7 @@ test("收尾首次写入失败后允许重试，并发通知只完成一次状�
 });
 
 test("事件流提前结束会取消原生任务，等待实际清理完成后才释放图片引用和群投递", async t => {
-  const f = await fixture(t, { images: true }); f.c.timeoutSec = -1;
+  const f = await fixture(t, { images: true }); f.c.limits.timeoutSec = -1;
   let release, entered, cancelled = false, cleaned = false;
   const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { entered = resolve; });
   const host = hostFixture(async ({ signal }) => {

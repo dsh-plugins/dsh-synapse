@@ -66,21 +66,15 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
   const profile = path.join(home, "profiles", "test"),
     data = path.join(profile, "data", "dsh-synapse");
   await mkdir(data, { recursive: true });
-  const c = {
-    ...defaultsFor(template.fields),
-    enabled: true,
-    ragEnabled: false,
-    learnMemory: false,
-    learnSkills: false,
-  };
-  c.modules.command.groups = [123];
+  const c = { ...defaultsFor(template.fields), enabled: true };
+  Object.assign(c.memory, { enabled: false, learnMemory: false, learnSkills: false });
+  c.modules.groupFeatures.command = [123];
   Object.assign(c.modules.chat, {
     requireMention: false,
     groups: [123],
-    reactionEnabled: false,
-    progressAsImage: false,
     replyPerSentence: true,
   });
+  Object.assign(c.modules.presentation, { reactionEnabled: false, progressAsImage: false });
   const requests = [];
   const http = createServer(async (req, res) => {
     let body = "";
@@ -102,10 +96,10 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
   });
   http.listen(0, "127.0.0.1");
   await once(http, "listening");
-  c.httpUrl = `http://127.0.0.1:${http.address().port}`;
+  c.connection.httpUrl = `http://127.0.0.1:${http.address().port}`;
   const ws = new WebSocketServer({ port: 0, host: "127.0.0.1" });
   await once(ws, "listening");
-  c.wsUrl = `ws://127.0.0.1:${ws.address().port}`;
+  c.connection.wsUrl = `ws://127.0.0.1:${ws.address().port}`;
   let socket;
   ws.on("connection", (s) => {
     socket = s;

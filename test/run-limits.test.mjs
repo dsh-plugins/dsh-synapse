@@ -34,20 +34,20 @@ test("配置可保存并恢复无限制，越界保存失败时快照和修订�
   const store = new ConfigStore(f.paths.profile);
   const handle = await store.register(null, template);
   try {
-    await handle.update({ timeoutSec: -1, maxToolRounds: -1 });
+    await handle.update({ limits: { ...handle.get().value.limits, timeoutSec: -1, maxToolRounds: -1 } });
     const saved = JSON.parse(await readFile(path.join(f.paths.profile, "config/dsh-synapse/config.json"), "utf8"));
     const restored = validateConfig(saved.value);
-    assert.equal(restored.timeoutSec, -1);
-    assert.equal(restored.maxToolRounds, -1);
+    assert.equal(restored.limits.timeoutSec, -1);
+    assert.equal(restored.limits.maxToolRounds, -1);
     const snapshot = handle.get();
     for (const [key, value] of [["timeoutSec", -2], ["timeoutSec", 601], ["maxToolRounds", -2], ["maxToolRounds", 21]]) {
-      await assert.rejects(handle.update({ [key]: value }), { code: "validation" });
+      await assert.rejects(handle.update({ limits: { ...snapshot.value.limits, [key]: value } }), { code: "validation" });
       assert.deepEqual(handle.get(), snapshot);
     }
-    await handle.update({ timeoutSec: 0, maxToolRounds: 0 });
+    await handle.update({ limits: { ...handle.get().value.limits, timeoutSec: 0, maxToolRounds: 0 } });
     assert.doesNotThrow(() => validateConfig(handle.get().value));
-    assert.doesNotThrow(() => validateConfig({ ...restored, timeoutSec: 4, maxToolRounds: 1 }));
-    assert.doesNotThrow(() => validateConfig({ ...restored, timeoutSec: 5, maxToolRounds: 1 }));
+    assert.doesNotThrow(() => validateConfig({ ...restored, limits: { ...restored.limits, timeoutSec: 4, maxToolRounds: 1 } }));
+    assert.doesNotThrow(() => validateConfig({ ...restored, limits: { ...restored.limits, timeoutSec: 5, maxToolRounds: 1 } }));
   } finally {
     handle.dispose();
     store.dispose();
@@ -64,14 +64,14 @@ for (const channel of ["chat", "review"]) {
       return "任务完成";
     });
     const run = steps => f.harness.run("规则", String(steps), [], [], undefined, undefined, undefined, undefined, channel);
-    f.config.maxToolRounds = 0;
+    f.config.limits.maxToolRounds = 0;
     await assert.rejects(run(1), /已达到任务步骤上限/);
-    f.config.maxToolRounds = 2;
+    f.config.limits.maxToolRounds = 2;
     assert.equal(await run(2), "任务完成");
     await assert.rejects(run(3), /已达到任务步骤上限/);
-    f.config.maxToolRounds = -1;
+    f.config.limits.maxToolRounds = -1;
     assert.equal(await run(25), "任务完成");
-    f.config.maxToolRounds = 2;
+    f.config.limits.maxToolRounds = 2;
     await assert.rejects(run(3), /已达到任务步骤上限/);
   });
 }
@@ -84,7 +84,7 @@ test("零秒时限阻止已有驻留会话继续执行模型和工具", async t 
   });
   const run = () => f.harness.run("规则", "消息", [], [], undefined, undefined, undefined, "chat:example");
   assert.equal(await run(), "任务完成");
-  f.config.timeoutSec = 0;
+  f.config.limits.timeoutSec = 0;
   await assert.rejects(run(), { name: "TimeoutError" });
   assert.equal(executions, 1);
 });
@@ -94,7 +94,7 @@ test("有限超时仍会取消正在执行的任务", { timeout: 15000 }, async 
     await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
     signal.throwIfAborted();
   });
-  f.config.timeoutSec = 5;
+  f.config.limits.timeoutSec = 5;
   await assert.rejects(f.harness.run("规则", "等待取消"), { name: "TimeoutError" });
 });
 
@@ -107,8 +107,8 @@ for (const cancellation of ["caller", "shutdown"]) {
       await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
       signal.throwIfAborted();
     });
-    f.config.timeoutSec = -1;
-    f.config.maxToolRounds = -1;
+    f.config.limits.timeoutSec = -1;
+    f.config.limits.maxToolRounds = -1;
     const controller = new AbortController();
     const task = f.harness.run("规则", "等待取消", [], [], controller.signal);
     await Promise.race([entered, task]);

@@ -69,13 +69,11 @@ test("显式选择模型后无需配置宿主默认模型", async (t) => {
   const data = await mkdtemp(path.join(os.tmpdir(), "synapse-models-"));
   const agent = new Agent({
     loader: host.loader,
-    config: () => ({
-      ...defaultsFor(template.fields),
-      chatModel: model,
-      learnSkills: false,
-      learnMemory: false,
-      ragEnabled: false,
-    }),
+    config: () => {
+      const c = defaultsFor(template.fields);
+      Object.assign(c.memory, { enabled: false, learnMemory: false, learnSkills: false });
+      return { ...c, chatModel: model };
+    },
     paths: { data, profile: data, home: data },
     memory: {},
     skills: { retrieve: async () => [] },

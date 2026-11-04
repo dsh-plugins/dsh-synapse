@@ -22,22 +22,22 @@ test("两个提示词弹窗编辑并通过 loader 保存后用于实际 Agent �
     }
   }
   for (const field of ["memoryPrompt", "skillPrompt"]) {
-    const dialog = dialogs.find((item) => item.field[0] === field);
+    const dialog = dialogs.find((item) => item.field[0] === "memory" && item.field[1] === field);
     assert(dialog);
     const before = f.handle.get();
-    let draft = before.value[field];
+    let draft = before.value.memory[field];
     const props = { value: draft, errors: {}, saving: false, setValue: (value) => { draft = value; } };
     const editor = dialog.component(props);
     const content = `自定义 ${field}\n应根据验证结果主动保存。`;
     textarea(editor).props.onChange({ target: { value: content } });
-    assert.equal(f.handle.get().value[field], before.value[field]);
-    await f.handle.update({ [field]: draft });
-    assert.equal(f.handle.get().value[field], content);
+    assert.equal(f.handle.get().value.memory[field], before.value.memory[field]);
+    await f.handle.update({ memory: { ...f.handle.get().value.memory, [field]: draft } });
+    assert.equal(f.handle.get().value.memory[field], content);
     assert.match(await agent.context("example", "chat"), new RegExp(`自定义 ${field}`));
     const html = renderToStaticMarkup(React.createElement(dialog.component, { ...props, value: draft, saving: true }));
     assert.match(html, /disabled/);
     assert.match(html, new RegExp(`自定义 ${field}`));
   }
-  await f.handle.update({ learnMemory: false, learnSkills: false });
+  await f.handle.update({ memory: { ...f.handle.get().value.memory, learnMemory: false, learnSkills: false } });
   assert(! (await agent.context("example", "review")).includes("自定义"));
 });

@@ -44,11 +44,11 @@ const inference = {
 test("defaults form valid config and reject invalid structured fields", () => {
   const c = config();
   assert.equal(validateConfig(c), c);
-  assert.equal(c.sessionPermission, "read-only");
-  assert.throws(() => validateConfig({ ...c, sessionPermission: "invalid" }));
+  assert.equal(c.limits.sessionPermission, "read-only");
+  assert.throws(() => validateConfig({ ...c, limits: { ...c.limits, sessionPermission: "invalid" } }));
   assert.throws(() => validateConfig({ ...c, mcpServers: [{ name: "x" }] }));
-  assert.throws(() => validateConfig({ ...c, githubEnabled: true }));
-  assert.throws(() => validateConfig({ ...c, recallK: 1.5 }));
+  assert.throws(() => validateConfig({ ...c, github: { ...c.github, enabled: true } }));
+  assert.throws(() => validateConfig({ ...c, memory: { ...c.memory, recallCount: 1.5 } }));
 });
 test("profile prompt overrides home; chat and review use distinct files", async () => {
   const p = await fixture();
@@ -106,7 +106,7 @@ test("actual sqlite-vec + FTS5 hybrid retrieval isolates channels and deduplicat
     const found = await memory.search("猫", "chat");
     assert.equal(found[0].text, "猫喜欢鱼");
     assert(found.every((x) => x.channel === "chat"));
-    c.reranker = true;
+    c.memory.reranker = true;
     assert.equal((await memory.search("代码", "chat"))[0].text, "代码重排");
     assert.equal(memory.list("review").length, 1);
   } finally {
@@ -143,9 +143,9 @@ test("signature validation uses raw bytes and repository allowlists", () => {
   assert(verifySignature(raw, secret, signature));
   assert(!verifySignature(Buffer.from('{"a":1}'), secret, signature));
   assert(!verifySignature(raw, "", signature));
-  assert(repositoryAllowed("Owner/Repo", "owner/*"));
-  assert(!repositoryAllowed("owner-evil/repo", "owner/*"));
-  assert(!repositoryAllowed("../repo", "owner/*"));
+  assert(repositoryAllowed("Owner/Repo", ["owner/*"]));
+  assert(!repositoryAllowed("owner-evil/repo", ["owner/*"]));
+  assert(!repositoryAllowed("../repo", ["owner/*"]));
 });
 test("cross-site and unavailable browser authentication are denied", () => {
   let status;
@@ -173,7 +173,8 @@ test("cross-site and unavailable browser authentication are denied", () => {
 test("agent injects SOUL, retrieved skill and memory; MCP executes only in chat", async () => {
   const p = await fixture();
   await writeFile(path.join(p.profile, "SOUL.md"), "shared soul");
-  const c = { ...config(), learnSkills: false, learnMemory: false };
+  const base = config();
+  const c = { ...base, memory: { ...base.memory, learnSkills: false, learnMemory: false } };
   let calls = 0;
   const host = hostFixture(
     async ({ variables, tools, restrictions, options, conversation, sections }) => {
@@ -333,11 +334,10 @@ test("Gateway routes single-use DSH approval and cancels pending approval on sto
 });
 test("durable GitHub queue creates head-bound review, deduplicates publication and skips stale heads", async () => {
   const memory = new Memory(":memory:", inference, config);
+  const base = config();
   const c = {
-    ...config(),
-    githubEnabled: true,
-    publishReviews: true,
-    repositories: "owner/repo",
+    ...base,
+    github: { ...base.github, enabled: true, publishReviews: true, allowedRepositories: ["owner/repo"] },
   };
   const bound = [];
   const r = new Reviews(
@@ -387,7 +387,8 @@ test(
   { timeout: 10000 },
   async () => {
     const memory = new Memory(":memory:", inference, config);
-    const c = { ...config(), githubEnabled: true };
+    const base = config();
+    const c = { ...base, github: { ...base.github, enabled: true } };
     const r = new Reviews(
       memory.db,
       {},

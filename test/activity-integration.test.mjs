@@ -30,9 +30,10 @@ test("真实 Bot/OneBot 验证持久化背景、概率、空闲 IPC、忽略名�
   const paths = { home: root, profile: root, data: path.join(root, "data", "dsh-synapse"), skills: path.join(root, "skills") };
   await mkdir(paths.data, { recursive: true });
   const c = defaultsFor(template.fields);
-  Object.assign(c, { enabled: true, ragEnabled: false, learnMemory: false, learnSkills: false });
-  Object.assign(c.modules.chat, { groups: [123], blockedUsers: [1], requireMention: true, reactionEnabled: false, replyPerSentence: false, progressAsImage: false });
-  c.modules.management.operators = [9, 42]; c.modules.command.groups = [123];
+  c.enabled = true; Object.assign(c.memory, { enabled: false, learnMemory: false, learnSkills: false });
+  Object.assign(c.modules.chat, { groups: [123], blockedUsers: [1], requireMention: true, replyPerSentence: false });
+  Object.assign(c.modules.presentation, { reactionEnabled: false, progressAsImage: false });
+  c.modules.management.operators = [9, 42]; c.modules.groupFeatures.command = [123];
   let clock = Date.parse("2026-11-04T04:00:00Z"), socket, number = 100, failSend = false;
   const requests = [], received = [], errors = [];
   const http = createServer(async (req, res) => {
@@ -42,9 +43,9 @@ test("真实 Bot/OneBot 验证持久化背景、概率、空闲 IPC、忽略名�
     res.setHeader("Content-Type", "application/json");
     if (failSend && req.url.startsWith("/send_group")) { failSend = false; res.end(JSON.stringify({ retcode: 100, wording: "模拟 OneBot 发送失败" })); return; }
     res.end(JSON.stringify({ retcode: 0, status: "ok", data: req.url === "/get_login_info" ? { user_id: 42, nickname: "testbot" } : req.url === "/get_group_info" ? { group_name: "群聊集成测试" } : { message_id: ++number } }));
-  }); http.listen(0, "127.0.0.1"); await once(http, "listening"); c.httpUrl = `http://127.0.0.1:${http.address().port}`;
+  }); http.listen(0, "127.0.0.1"); await once(http, "listening"); c.connection.httpUrl = `http://127.0.0.1:${http.address().port}`;
   const ws = new WebSocketServer({ port: 0, host: "127.0.0.1" }); await once(ws, "listening");
-  ws.on("connection", value => { socket = value; }); c.wsUrl = `ws://127.0.0.1:${ws.address().port}`;
+  ws.on("connection", value => { socket = value; }); c.connection.wsUrl = `ws://127.0.0.1:${ws.address().port}`;
   let hold = false, entered = false;
   const host = hostFixture(async ({ message, signal }) => {
     received.push(message);

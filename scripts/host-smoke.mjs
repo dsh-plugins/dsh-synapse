@@ -358,9 +358,9 @@ try {
   assert.equal(memory.list("review").length, 0);
   assert.equal((await skills.list())[0].content, "# 流程\n已验证的步骤");
   const originalFetch = globalThis.fetch;
-  const repositories = config.repositories;
+  const repositories = config.github.allowedRepositories;
   try {
-    config.repositories = "foo/bar";
+    config.github.allowedRepositories = ["foo/bar"];
     let queries = 0;
     globalThis.fetch = async (input, init) => {
       init.signal.throwIfAborted();
@@ -395,7 +395,7 @@ try {
     assert.match(JSON.stringify(requests.at(-1)), /receipt-echo/);
   } finally {
     globalThis.fetch = originalFetch;
-    config.repositories = repositories;
+    config.github.allowedRepositories = repositories;
   }
   if (process.argv[3]) {
     // 指定旧版 sharp 入口，可在不下载模型权重时验证真实 DLL 的进程隔离。
@@ -416,7 +416,7 @@ try {
   assert((await ctx.attachments.readImage(image.attachment)).data.length > 0);
   await harness.close();
   harness = makeHarness();
-  config.sessionPermission = "danger-full-access";
+  config.limits.sessionPermission = "danger-full-access";
   await residentRun("Updated persona", "after plugin reload");
   assert.equal(await permissionOf(requests[0].sessionId), "read-only");
   assert.match(JSON.stringify(requests.at(-1)), /first resident message/);
@@ -436,7 +436,7 @@ try {
   await cancelled;
   await residentRun("Updated persona", "continue after cancellation");
   assert.equal(requests.at(-1).sessionId, requests[0].sessionId);
-  config.maxToolRounds = 1;
+  config.limits.maxToolRounds = 1;
   callTool = true;
   await assert.rejects(
     residentRun("Updated persona", "step limit", [
@@ -453,7 +453,7 @@ try {
     ]),
     /步骤上限/,
   );
-  config.maxToolRounds = 6;
+  config.limits.maxToolRounds = 6;
   await residentRun("Updated persona", "continue after failed turn");
   assert.equal(requests.at(-1).sessionId, requests[0].sessionId);
   await harness.reset("chat:group:123");
@@ -464,13 +464,13 @@ try {
   );
   assert(!JSON.stringify(requests.at(-1)).includes("first resident message"));
   assert.equal((await ctx.sessionPersistence.list()).length, 2);
-  config.sessionPermission = "workspace-write";
+  config.limits.sessionPermission = "workspace-write";
   await harness.run("context", "new workspace session");
   assert.equal(
     await permissionOf(requests.at(-1).sessionId),
     "workspace-write",
   );
-  config.sessionPermission = "auto";
+  config.limits.sessionPermission = "auto";
   await assert.rejects(
     harness.run("context", "unavailable auto"),
     /dsh-experimental-auto-review/,
@@ -482,7 +482,7 @@ try {
     await harness.run("context", "new auto session");
     assert.equal(await permissionOf(requests.at(-1).sessionId), "auto");
   }
-  config.sessionPermission = "read-only";
+  config.limits.sessionPermission = "read-only";
   await harness.close();
   const binding = await new SessionBindings(data).get("chat:group:123");
   const occupied = await ctx.sessionPersistence.open(binding.id, "write");

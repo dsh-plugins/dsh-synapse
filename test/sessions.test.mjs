@@ -24,12 +24,8 @@ async function fixture(execute) {
     data: path.join(home, "profiles/test/data/dsh-synapse"),
   };
   await mkdir(paths.profile, { recursive: true });
-  const config = {
-    ...defaultsFor(template.fields),
-    ragEnabled: false,
-    learnMemory: false,
-    learnSkills: false,
-  };
+  const config = defaultsFor(template.fields);
+  Object.assign(config.memory, { enabled: false, learnMemory: false, learnSkills: false });
   const host = hostFixture(execute);
   const create = () =>
     new Agent({

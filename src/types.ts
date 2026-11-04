@@ -50,51 +50,84 @@ export interface MemoryModelConfig {
   model: string;
   dimensions?: number;
 }
-export interface SynapseConfig {
-  activity: ActivityConfig;
-  enabled: boolean;
-  chatModel: ConfigModelValue | null;
-  reviewModel: ConfigModelValue | null;
+/** OneBot 连接参数；HTTP 与 WebSocket 令牌由机器人分别用于两条连接。 */
+export interface ConnectionConfig {
   httpUrl: string;
   wsUrl: string;
   httpToken: string;
   wsToken: string;
   chromePath: string;
   userAgent: string;
-  logLevel: string;
   tokenParams: string;
+  logLevel: string;
+}
+/** 新建会话的运行限制，已有会话保留原权限。 */
+export interface LimitsConfig {
   sessionPermission:
     "read-only" | "workspace-write" | "danger-full-access" | "auto";
   timeoutSec: number;
   maxToolRounds: number;
-  githubEnabled: boolean;
-  githubToken: string;
+}
+/** GitHub Webhook 审查；allowedRepositories 每项为 owner/repo 或 owner/*。 */
+export interface GithubReviewConfig {
+  enabled: boolean;
+  token: string;
   webhookSecret: string;
-  repositories: string;
+  allowedRepositories: string[];
   publishReviews: boolean;
   maxDiffChars: number;
-  ragEnabled: boolean;
+}
+/** 混合记忆与 Skill 自总结，两个通道的记忆库相互隔离。 */
+export interface MemorySettings {
+  enabled: boolean;
   embeddingModel: MemoryModelConfig;
   rerankModel: MemoryModelConfig;
-  recallK: number;
-  memoryK: number;
+  recallCount: number;
+  contextCount: number;
   reranker: boolean;
   learnMemory: boolean;
   learnSkills: boolean;
   memoryPrompt: string;
   skillPrompt: string;
-  maxMemories: number;
+  maxItems: number;
+}
+/** 进度卡片、审批与表情回应，写入机器人配置时并回聊天配置。 */
+export interface PresentationConfig {
+  progressRateLimitSec: number;
+  progressAsImage: boolean;
+  progressMaxTools: number;
+  approvalEnabled: boolean;
+  approvalTimeoutSec: number;
+  reactionEnabled: boolean;
+  reactionEmojiQq: string;
+  reactionEmojiDiscord: string;
+  privateReactionFallbackText: boolean;
+  privateReceiptText: string;
+}
+/** 只按群号启用的五个功能，写入机器人配置时拆回各自的文件。 */
+export interface GroupFeatures {
+  parentheses: number[];
+  poke: number[];
+  minecraft: number[];
+  modrinth: number[];
+  command: number[];
+}
+export interface SynapseConfig {
+  activity: ActivityConfig;
+  enabled: boolean;
+  chatModel: ConfigModelValue | null;
+  reviewModel: ConfigModelValue | null;
+  connection: ConnectionConfig;
+  limits: LimitsConfig;
+  github: GithubReviewConfig;
+  memory: MemorySettings;
   modules: {
     management: {
       groups: number[];
       operators: number[];
       discordOperators: string[];
     };
-    parentheses: { groups: number[] };
-    poke: { groups: number[] };
-    minecraft: { groups: number[] };
-    modrinth: { groups: number[] };
-    command: { groups: number[] };
+    groupFeatures: GroupFeatures;
     bili: { groups: number[]; follow: number[] };
     github: { subscriptions: { repository: string; groups: number[] }[] };
     welcome: { welcomes: { group: number[]; msg: string }[] };
@@ -116,9 +149,6 @@ export interface SynapseConfig {
       blockedUsers: number[];
       requireMention: boolean;
       keywordTriggers: string[];
-      progressRateLimitSec: number;
-      progressAsImage: boolean;
-      progressMaxTools: number;
       maxMessageLength: number;
       forwardImages: boolean;
       replyPerSentence: boolean;
@@ -127,14 +157,8 @@ export interface SynapseConfig {
       localHistoryMaxMessages: number;
       persistHistoryEnabled: boolean;
       persistHistoryMax: number;
-      approvalEnabled: boolean;
-      approvalTimeoutSec: number;
-      reactionEnabled: boolean;
-      reactionEmojiQq: string;
-      reactionEmojiDiscord: string;
-      privateReactionFallbackText: boolean;
-      privateReceiptText: string;
     };
+    presentation: PresentationConfig;
     peakValley: {
       groups: number[];
       mode: string;
@@ -145,10 +169,10 @@ export interface SynapseConfig {
         mode: string;
         msg: string;
       }[];
-      peak_msg: string;
-      valley_msg: string;
-      cmd_peak_msg: string;
-      cmd_valley_msg: string;
+      peakMessage: string;
+      valleyMessage: string;
+      peakReply: string;
+      valleyReply: string;
     };
   };
   mcpServers: McpSpec[];

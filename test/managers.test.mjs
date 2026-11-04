@@ -131,7 +131,7 @@ test("管理表格与弹窗完成 Skill 预览编辑、MCP 草稿测试保存、
   await input('input[aria-label="新增群号"]', "123");
   await click("新增群策略", modal());
   assert(modal().querySelector("table").textContent.includes("123"));
-  assert(modal().textContent.includes("继承全局参数"));
+  assert(modal().textContent.includes("使用全局参数"));
   await click("保存", modal()); await until(() => !modal());
   assert.equal(f.handle.get().value.activity.groups[0].groupId, 123);
 

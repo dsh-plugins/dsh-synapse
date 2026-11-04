@@ -26,9 +26,9 @@ function MemoryImport({ view, client, close }: ConfigPanelProps & { close(): voi
   };
   return <EditorDialog title="导入 Hermes 记忆" close={close} locked={request.writing}
     actions={<Arco.Button disabled={!markdown.trim() || request.busy} onClick={() => { void showPreview(); }}>{preview ? "编辑" : "预览"}</Arco.Button>}
-    footer={<Arco.Space>{request.writing && <Arco.Button onClick={request.cancel}>取消导入</Arco.Button>}<Arco.Button disabled={request.writing} onClick={close}>关闭</Arco.Button><Arco.Button type="primary" loading={request.busy} disabled={!view.value.ragEnabled || !markdown.trim() || request.busy || Boolean(summary)} onClick={() => { void importMemory(); }}>确认导入</Arco.Button></Arco.Space>}>
+    footer={<Arco.Space>{request.writing && <Arco.Button onClick={request.cancel}>取消导入</Arco.Button>}<Arco.Button disabled={request.writing} onClick={close}>关闭</Arco.Button><Arco.Button type="primary" loading={request.busy} disabled={!(view.value.memory as { enabled?: boolean } | undefined)?.enabled || !markdown.trim() || request.busy || Boolean(summary)} onClick={() => { void importMemory(); }}>确认导入</Arco.Button></Arco.Space>}>
     <ErrorNotice error={request.error}/>
-    {!view.value.ragEnabled && <Arco.Alert type="warning" content="请先保存并启用本地混合记忆，之后可以确认导入。"/>}
+    {!(view.value.memory as { enabled?: boolean } | undefined)?.enabled && <Arco.Alert type="warning" content="请先在「长期记忆与 Skill」中启用长期记忆并保存，之后可以确认导入。"/>}
     {summary && <Arco.Alert type="success" content={summary}/>}
     <div className="synapse-editor-field"><label>记忆分类</label><Arco.Select value={channel} disabled={request.busy} options={[{ label: "聊天", value: "chat" }, { label: "GitHub 审查", value: "review" }]} onChange={value => { setChannel(value); setSummary(""); setCount(undefined); }}/></div>
     {count !== undefined && <p>将按 Hermes 规则导入 {count} 条记忆。</p>}

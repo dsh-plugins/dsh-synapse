@@ -181,8 +181,8 @@ export function registerOperations(
       },
     }),
     "memory.import": async (s, { input, signal }) => {
-      if (!s.config().ragEnabled)
-        throw new ConfigError("validation", "请先在配置中启用 RAG");
+      if (!s.config().memory.enabled)
+        throw new ConfigError("validation", "请先在配置中启用长期记忆");
       const result = await s.memory.addMany(
         parseHermes(String(input.markdown), String(input.channel)),
         signal,

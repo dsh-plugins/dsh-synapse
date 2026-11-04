@@ -158,7 +158,7 @@ export class ChatImages {
   }
 
   private async api(action: string, input: object): Promise<any> {
-    const c = this.config();
+    const c = this.config().connection;
     const response = await fetch(new URL(action, c.httpUrl.replace(/\/?$/, "/")), {
       method: "POST", signal: AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(20000)]),
       headers: { "Content-Type": "application/json", ...(c.httpToken ? { Authorization: `Bearer ${c.httpToken}` } : {}) }, body: JSON.stringify(input),
@@ -214,7 +214,7 @@ export class ChatImages {
     let url: URL;
     try { url = new URL(source); } catch { /* OneBot file 标识需要先解析。 */ }
     if (!url || !["http:", "https:"].includes(url.protocol)) {
-      const c = this.config();
+      const c = this.config().connection;
       const response = await fetch(new URL("get_image", c.httpUrl.replace(/\/?$/, "/")), {
         method: "POST", signal,
         headers: { "Content-Type": "application/json", ...(c.httpToken ? { Authorization: `Bearer ${c.httpToken}` } : {}) },
