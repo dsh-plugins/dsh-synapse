@@ -45,6 +45,42 @@ test("同一会话待发文字合并，群聊和同号私聊相互独立且共�
   assert.equal(f.sent.length, 1);
 });
 
+for (const operation of [false, true]) {
+  test(`${operation ? "共享操作" : "消息请求"}同步启动耗时不缩短后续发送间隔`, async t => {
+    let now = 1000;
+    const started = [];
+    t.mock.method(Date, "now", () => now);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const record = () => {
+      if (!started.length) { now += 5; }
+      started.push(now);
+      return started.length;
+    };
+    const queue = new QQSendQueue({
+      request: async () => record(),
+      limits: () => ({ compactMaxChars: 0, compactMaxLines: 0, maxMessageLength: 0, botName: "bot" }),
+      identity: () => ({ user_id: 42 }),
+      sent: () => undefined,
+      onError: error => assert.fail(error),
+    }, 10);
+    t.after(() => queue.close());
+    const pending = [];
+    if (operation) { queue.operation(() => { record(); }); }
+    else { pending.push(queue.send("group", 1, text("第一条"))); }
+    pending.push(queue.send("group", 2, text("第二条")));
+    t.mock.timers.tick(0);
+    assert.equal(started.length, 1);
+    now += 5;
+    t.mock.timers.tick(5);
+    assert.equal(started.length, 1);
+    now += 5;
+    t.mock.timers.tick(5);
+    await Promise.all(pending);
+    assert.equal(started.length, 2);
+    assert(started[1] - started[0] >= 10);
+  });
+}
+
 test("会话轮流发送，同会话不同引用和不可合并回执保留顺序", async t => {
   const f = fixture(t);
   const jobs = [

@@ -166,6 +166,7 @@ export class QQSendQueue {
         this.active.delete(task);
         this.finish(key, outbox);
       });
+      this.nextAt = Date.now() + this.intervalMs;
       this.schedule();
     }, Math.max(0, this.nextAt - Date.now()));
   }
@@ -212,7 +213,6 @@ export class QQSendQueue {
     let id: number | undefined;
     try {
       if ("work" in task) {
-        this.nextAt = Date.now() + this.intervalMs;
         await task.work();
         return;
       }
@@ -242,7 +242,6 @@ export class QQSendQueue {
         payload = { [`${outbox.type === "group" ? "group" : "user"}_id`]: outbox.id, messages: nodes };
       }
       this.shutdown.signal.throwIfAborted();
-      this.nextAt = Date.now() + this.intervalMs;
       id = await this.options.request(`send_${outbox.type}_${forward ? "forward_msg" : "msg"}`, payload, this.shutdown.signal);
       if (id === undefined) {
         throw new Error(`QQ ${outbox.type}:${outbox.id} 发送失败，OneBot 未返回消息 ID`);

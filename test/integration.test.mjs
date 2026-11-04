@@ -224,6 +224,7 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
       [1, "清除上下文"],
     ]) {
       if (text === "清除上下文") {
+        await waitFor(() => received.length === 4, 12000);
         await waitFor(() => requests.some((r) => r.url === "/send_group_msg" && JSON.stringify(r.body).includes("example-release")));
       }
       socket.send(
