@@ -83,6 +83,58 @@ test("背景按批领取，提交期间的新消息保留；确认提交后模�
   assert.deepEqual(f.state.messages("123").map(item => item.messageId), ["3", "4"]);
 });
 
+test("连续触发逆序提交时其他待提交消息不会被当作背景清除", async t => {
+  const f = await fixture(t);
+  await f.activity.observe(event(1, "先前背景"));
+  const first = await f.activity.observe(event(2, "第一条问题", "123", "1", { mentioned: true }));
+  const second = await f.activity.observe(event(3, "第二条问题", "123", "2", { mentioned: true }));
+  const latest = await f.activity.submission("123", second.seq);
+  assert.match(latest.submission.background, /先前背景/);
+  assert.doesNotMatch(latest.submission.background, /第一条问题/);
+  latest.submission.prepared("native", "second"); latest.submission.committed();
+  assert.deepEqual(f.state.messages("123").map(item => item.messageId), ["2"]);
+  const earlier = await f.activity.submission("123", first.seq);
+  assert.match(earlier.input, /第一条问题/);
+  earlier.submission.prepared("native", "first"); earlier.submission.committed();
+  assert.equal(f.state.messages("123").length, 0);
+});
+
+test("空闲批次只领取背景而不领取待提交的真人触发消息", async t => {
+  const f = await fixture(t);
+  await f.activity.observe(event(1, "先前背景"));
+  const trigger = await f.activity.observe(event(2, "真人问题", "123", "1", { mentioned: true }));
+  const batch = f.state.claim("123", 0, f.now());
+  assert.deepEqual(f.state.messages("123", batch.id).map(item => item.messageId), ["1"]);
+  f.state.commitBatch(batch.id);
+  const run = await f.activity.submission("123", trigger.seq);
+  assert.match(run.input, /真人问题/);
+});
+
+test("独立 SQLite 连接并发写入不打断消息判定，事务完成后继续写入", async t => {
+  const f = await fixture(t);
+  const message = f.state.append(event(1), "当前问题", "当前问题", [], f.now(), undefined, true);
+  const writer = new ChatState(path.join(f.paths.data, "chat-state.sqlite"));
+  writer.db.pragma("busy_timeout = 0");
+  const read = f.state.message.bind(f.state);
+  let attempted = false, blocked = false;
+  t.mock.method(f.state, "message", seq => {
+    const item = read(seq);
+    if (!attempted) {
+      attempted = true;
+      try { writer.log({ groupId: "123", type: "check", reason: "并发写入" }); }
+      catch (error) { assert.equal(error.code, "SQLITE_BUSY"); blocked = true; }
+    }
+    return item;
+  });
+  try {
+    f.state.finishObservation(message.seq, true);
+    assert.equal(attempted, true); assert.equal(blocked, true);
+    assert.equal(f.state.message(message.seq).foreground, true);
+    writer.log({ groupId: "123", type: "check", reason: "判定后继续写入" });
+    assert.equal(f.state.logs()[0].reason, "判定后继续写入");
+  } finally { writer.close(); }
+});
+
 test("崩溃恢复按批次和原生消息 ID 核对；未确认的背景恢复，已提交背景清理", async t => {
   const f = await fixture(t);
   await f.activity.observe(event(1));

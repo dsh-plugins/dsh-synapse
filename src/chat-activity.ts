@@ -163,7 +163,7 @@ export class ChatActivity {
       }
       this.state.saveGroup(group);
       return item;
-    })();
+    }).immediate();
     if (!item) { return Promise.resolve({ triggered: false, duplicate: true, reason: "重复事件" }); }
     this.track(this.images.process(item.seq)).catch(this.onError);
     const previous = this.groupQueues.get(message.groupId) ?? Promise.resolve();
@@ -322,7 +322,7 @@ export class ChatActivity {
           if (idle) { delete group.pendingId; delete group.pendingDue; this.state.addDelivery(`trigger:${triggerId}`, groupId, triggerId, this.now()); }
           this.state.saveGroup(group);
           this.log(groupId, "submit", "自动任务提交到原生会话", { triggerId });
-        })();
+        }).immediate();
       }
       const read = () => {
         const batchState = this.state.batch(batch.id);
@@ -377,7 +377,7 @@ export class ChatActivity {
       if (triggerId) { this.state.finishDelivery(`trigger:${triggerId}`); }
       const batch = batchId && this.state.batch(batchId);
       if (batch?.currentSeq) { this.state.finishDelivery(`observation:${batch.currentSeq}`); }
-    })();
+    }).immediate();
   }
   async finished(id: string, batchId?: string, failed = false, triggerId?: string) {
     let outcome: "commit" | "release" | "retain" = "release";
@@ -406,7 +406,7 @@ export class ChatActivity {
       this.state.triggerState(triggerId, failed ? "failed" : "sent");
       this.log(trigger?.group_id || "", failed ? "failure" : "send", failed ? "自动回复执行或发送失败" : "自动回复发送完成", { triggerId });
     }
-    })();
+    }).immediate();
   }
 
   sent(groupId: string, eventId: string = randomUUID()) {
@@ -416,7 +416,7 @@ export class ChatActivity {
       if (!this.state.sentEvent(eventId, groupId, this.now())) { return; }
       group.lastBotAt = this.now(); this.state.saveGroup(group);
       this.log(groupId, "send", "Bot 成功发送群消息，刷新冷却");
-    })();
+    }).immediate();
   }
 
   reset(groupId: string) {

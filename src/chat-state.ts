@@ -112,7 +112,7 @@ export class ChatState {
       if (cloudText) { this.db.prepare("INSERT OR IGNORE INTO cloud_inbox VALUES(?,?,?,?,?)").run(message.groupId, message.messageId, message.userId, message.time, cloudText); }
       this.trim(message.groupId);
       return { ...payload, seq: Number(result.lastInsertRowid), batchId: null, foreground: false };
-    })();
+    }).immediate();
   }
 
   message(seq: number): ContextMessage | undefined {
@@ -140,7 +140,7 @@ export class ChatState {
           if (item.batchId) { this.db.prepare("INSERT OR IGNORE INTO image_pins VALUES(?,?)").run(item.batchId, image.path); }
         }
       }
-    })();
+    }).immediate();
   }
 
   finishObservation(seq: number, foreground: boolean) {
@@ -149,7 +149,7 @@ export class ChatState {
       if (!item) { return; }
       this.db.prepare("UPDATE context SET foreground=? WHERE seq=?").run(Number(foreground), seq);
       this.trim(item.groupId);
-    })();
+    }).immediate();
   }
 
   private trim(groupId: string) {
@@ -164,10 +164,10 @@ export class ChatState {
       const id = randomUUID();
       this.db.prepare("INSERT INTO batches(id,group_id,state,current_seq,created) VALUES(?,?,'claimed',?,?)").run(id, groupId, currentSeq, now);
       const cutoff = currentSeq || (this.db.prepare("SELECT MAX(seq) AS seq FROM context WHERE group_id=?").get(groupId) as any).seq || 0;
-      this.db.prepare("UPDATE context SET batch_id=? WHERE group_id=? AND seq<=? AND batch_id IS NULL AND foreground<>2").run(id, groupId, cutoff);
+      this.db.prepare("UPDATE context SET batch_id=? WHERE group_id=? AND seq<=? AND batch_id IS NULL AND (foreground=0 OR (foreground=1 AND seq=?))").run(id, groupId, cutoff, currentSeq);
       this.db.prepare("INSERT OR IGNORE INTO image_pins SELECT ?,image_refs.path FROM image_refs JOIN context USING(seq) WHERE context.batch_id=?").run(id, id);
       return { id, groupId, state: "claimed" as const, currentSeq, created: now };
-    })();
+    }).immediate();
   }
 
   prepareBatch(id: string, sessionId: string, messageId: string) {
@@ -186,7 +186,7 @@ export class ChatState {
       }
       this.db.prepare("UPDATE batches SET state='committed' WHERE id=?").run(id);
       this.db.prepare("DELETE FROM context WHERE batch_id=?").run(id);
-    })();
+    }).immediate();
   }
 
   releaseBatch(id: string) {
@@ -197,7 +197,7 @@ export class ChatState {
       this.db.prepare("UPDATE context SET batch_id=NULL,foreground=0 WHERE batch_id=?").run(id);
       const groupId = this.batch(id).groupId;
       this.trim(groupId);
-    })();
+    }).immediate();
   }
 
   batch(id: string): ContextBatch | undefined {
@@ -261,14 +261,14 @@ export class ChatState {
       this.db.prepare("UPDATE triggers SET state='cancelled' WHERE state='reserved'").run();
       this.db.prepare("UPDATE context SET foreground=0 WHERE batch_id IS NULL").run();
       for (const row of this.db.prepare("SELECT DISTINCT group_id FROM context").all() as any[]) { this.trim(row.group_id); }
-    })();
+    }).immediate();
   }
 
   reset(groupId: string) {
     this.db.transaction(() => {
       this.db.prepare("UPDATE batches SET state='released' WHERE group_id=? AND state='claimed'").run(groupId);
       this.db.prepare("DELETE FROM context WHERE group_id=?").run(groupId);
-    })();
+    }).immediate();
   }
 
   removeUsers(users: string[]) {
@@ -282,7 +282,7 @@ export class ChatState {
           this.db.prepare("DELETE FROM cloud_documents WHERE sender=?").run(user);
         }
       }
-    })();
+    }).immediate();
   }
 
   log(item: ActivityLog) {
@@ -325,7 +325,7 @@ export class ChatState {
       this.db.prepare("DELETE FROM triggers WHERE created<?").run(now - Math.max(days, 2) * 86400000);
       this.db.prepare("DELETE FROM batches WHERE state!='claimed' AND created<?").run(before);
       this.db.prepare("DELETE FROM image_refs WHERE NOT EXISTS(SELECT 1 FROM context WHERE context.seq=image_refs.seq)").run();
-    })();
+    }).immediate();
   }
 
   close() { this.db.close(); }

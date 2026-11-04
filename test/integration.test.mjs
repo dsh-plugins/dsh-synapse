@@ -266,7 +266,10 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
         "\n" +
         bot.stderr +
         "\n" +
-        log.slice(-6000),
+        log.slice(-6000) +
+        "\n" + JSON.stringify({ received: received.map(item => ({ key: item.key, input: item.input })), errors,
+          pending: state.allMessages().map(({ seq, messageId, foreground, batchId }) => ({ seq, messageId, foreground, batchId })) }),
+      { cause: e },
     );
   } finally {
     await bot.stop();
