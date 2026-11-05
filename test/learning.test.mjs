@@ -12,6 +12,81 @@ import { hostFixture } from "./fixtures/host.mjs";
 import { learningTools } from "../lib/host/native-tools.js";
 
 for (const legacySubagents of [false, true]) {
+  test(`记忆与 Skill 子代理遵守无限、有限、零步骤及热更新开关（旧 API：${legacySubagents}）`, async (t) => {
+    const home = await mkdtemp(path.join(os.tmpdir(), "synapse-learning-"));
+    const paths = { home, profile: home, data: path.join(home, "data"), skills: path.join(home, "skills") };
+    const c = defaultsFor(template.fields);
+    const memory = new Memory(":memory:", { embed: async () => [1, ...Array(511).fill(0)] }, () => c);
+    const skills = new SkillStore(paths);
+    let scenario;
+    const errors = [];
+    const host = hostFixture(async ({ options, tools, signal }) => {
+      const call = (name, args) => tools.find((tool) => tool.name === name).execute(args, { signal });
+      if (options.meta?.origin === "subagent") {
+        if (scenario.disabled) {
+          c.memory[scenario.kind === "memory" ? "learnMemory" : "learnSkills"] = false;
+        }
+        const child = host.created.find((item) => item.agent.id === options.sessionId);
+        for (let step = 1; step < scenario.steps; step++) {
+          await child.listeners.get("agent/pre-step")({ agent: child.agent }, async () => ({ kind: "enter" }));
+        }
+        if (scenario.kind === "memory") {
+          await call("synapse_memory_search", { query: "长期偏好" });
+          await call("synapse_memory_save", { text: `${scenario.channel} 长期偏好 ${scenario.index}` });
+        } else {
+          await call("synapse_skill_list", {});
+          await call("synapse_skill_save", { name: `auto-${scenario.channel}-example-${scenario.index}`, content: "# 已验证步骤\n运行并确认测试通过。" });
+        }
+        return "子代理已确认保存";
+      }
+      c.limits.maxToolRounds = scenario.limit;
+      const task = call(`synapse_${scenario.kind}_summarize`, { evidence: "已核实的长期偏好或已验证步骤" });
+      if (scenario.error) {
+        await assert.rejects(task, /总结子代理未完成/);
+        assert.equal(errors.at(-1)?.message, scenario.error);
+      } else {
+        assert.equal((await task).summary, "子代理已确认保存");
+      }
+      return "主会话完成";
+    }, { legacySubagents });
+    const off = host.loader.services.get("agents").ctx.on("agent/created", ({ agent }) => {
+      if (agent.session.header.parentSession) {
+        agent.ctx.on("agent/error", ({ error }) => errors.push(error));
+      }
+    });
+    const agent = new Agent({ loader: host.loader, config: () => c, paths, memory, skills, mcp: { available: async () => [] } });
+    t.after(async () => { off(); await agent.close(); memory.close(); await rm(home, { recursive: true, force: true }); });
+    for (const channel of ["chat", "review"]) {
+      for (const kind of ["memory", "skill"]) {
+        const scenarios = [
+          { limit: -1, steps: 25 },
+          { limit: 2, steps: 2 },
+          { limit: 2, steps: 3, error: "已达到总结子代理步骤上限" },
+          { limit: 0, steps: 1, error: "已达到总结子代理步骤上限" },
+          { limit: -1, steps: 2, disabled: true, error: "对应总结功能已关闭" },
+          { limit: -1, steps: 25 },
+        ];
+        for (const [index, item] of scenarios.entries()) {
+          scenario = { channel, kind, index, ...item };
+          c.limits.maxToolRounds = -1;
+          c.memory.learnMemory = true;
+          c.memory.learnSkills = true;
+          assert.equal(await agent.run("验证总结限制", channel, [], undefined, undefined, "", undefined, `${channel}:limits`), "主会话完成");
+        }
+      }
+      assert.equal(memory.list(channel).length, 3);
+      assert.equal((await skills.list()).filter((item) => item.name.startsWith(`auto-${channel}-`)).length, 3);
+    }
+    const children = host.created.filter((item) => item.options.meta?.parentSession);
+    assert(children.every((child) => host.disposed.includes(child.agent.id)));
+    assert(children.every((child) => child.tools.length === 0 && child.sections.length === 0 && child.variables.size === 0 && !child.listeners.has("agent/pre-step")));
+    off();
+    assert.equal(host.listenerCount("agent/created"), 0);
+    assert.equal(host.listenerCount("subagent/end"), 0);
+  });
+}
+
+for (const legacySubagents of [false, true]) {
   test(`主模型并行委派原生子代理总结记忆和 Skill，保留父子关系与模型路由（旧 API：${legacySubagents}）`, async (t) => {
     const home = await mkdtemp(path.join(os.tmpdir(), "synapse-learning-"));
     const paths = { home, profile: home, data: path.join(home, "data"), skills: path.join(home, "skills") };

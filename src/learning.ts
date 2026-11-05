@@ -40,8 +40,12 @@ export function learningDelegations(loader: HostAPI, config: ConfigSource, memor
           if (!configured || setupError) {
             throw setupError ?? new Error("总结子代理初始化失败");
           }
-          if (!enabled(kind) || ++steps > config().limits.maxToolRounds) {
-            throw new Error("总结功能已关闭或已达到步骤上限");
+          if (!enabled(kind)) {
+            throw new Error("对应总结功能已关闭");
+          }
+          const maxSteps = config().limits.maxToolRounds;
+          if (++steps > maxSteps && maxSteps !== -1) {
+            throw new Error("已达到总结子代理步骤上限");
           }
           return next();
         }));

@@ -495,6 +495,7 @@ try {
     await occupied.close();
   }
   const delegated = [];
+  const delegationLimit = config.limits.maxToolRounds;
   const offDelegated = ctx.on("subagent/start", (info) => {
     const child = ctx.agents.get(info.id);
     assert.equal(child.session.header.parentSession, requests.at(-1).sessionId);
@@ -502,6 +503,7 @@ try {
     delegated.push(info.id);
   });
   try {
+    config.limits.maxToolRounds = -1;
     for (const [kind, args] of [
       ["memory", { text: "原生子代理保存的重要事项" }],
       ["skill", { name: "auto-chat-delegated", content: "# 原生子代理流程\n已验证的复用步骤。" }],
@@ -525,6 +527,7 @@ try {
     assert.equal(delegated.length, 2);
     assert(delegated.every(id => !ctx.agents.get(id)));
   } finally {
+    config.limits.maxToolRounds = delegationLimit;
     offDelegated();
   }
   const parent = ctx.agents.get(requests.at(-1).sessionId);
