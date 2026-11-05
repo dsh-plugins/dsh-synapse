@@ -4,6 +4,7 @@ import type { SynapseConfig } from "./types.js";
 import { panels } from "./operation-panels.js";
 import { activityField, validateActivity } from "./activity-config.js";
 import { validateMemoryModel } from "./online-models.js";
+import { validateSpeech } from "./speech.js";
 import {
   text,
   flag,
@@ -96,6 +97,17 @@ export const template = defineConfig({
       flag("publishReviews", "把审查结果发布为评论"),
       { ...num("maxDiffChars", "差异内容上限（字符）", 80000, 1000, 500000), description: "PR 差异超过该长度后截断，审查结果会注明覆盖不完整。" },
     ], COLLAPSED),
+    object("speech", "语音合成（BreezeBlue）", [
+      { ...flag("enabled", "允许 Bot 主动发送语音"), description: "开启后模型可调用语音工具回复当前 QQ 群、私聊或 Discord 频道；合成内容会发送给 BreezeBlue 并消耗账户额度。" },
+      text("baseUrl", "服务地址（Base URL）", "https://api.breeze.blue/v1"),
+      text("apiKey", "API Key", "", "password"),
+      { ...text("voiceId", "音色 ID"), description: "填写 BreezeBlue 音色库中的 voice_id，使用你有权使用的音色。" },
+      text("modelId", "语音模型 ID", "breeze-tts-2"),
+      { ...text("languageCode", "语言代码", "zh"), description: "中文 zh、英文 en；留空时由所选模型处理语言。模型和语言须相互兼容。" },
+      { ...text("instructions", "默认朗读风格", "自然、亲切地说话，语速适中。", "textarea"), description: "用与正文相同的语言描述语气和情绪，模型可以针对本次朗读调整，最多 2000 字符。" },
+      { ...num("maxCharacters", "单条语音最多字符数", 1000, 1, 2000), description: "默认 1000。超过 1000 需要 BreezeBlue 为账户批准更高限制；超长内容会拒绝合成。" },
+      num("timeoutSec", "合成超时（秒）", 60, 1, 300),
+    ], COLLAPSED),
     object("memory", "长期记忆与 Skill", [
       { ...flag("enabled", "启用长期记忆", true), description: "按通道保存事实与偏好，聊天与审查的记忆相互独立。" },
       { ...num("contextCount", "每次放进上下文的记忆条数", 8, 1, 50), description: "从检索结果中取前几条作为回复的背景参考。" },
@@ -140,6 +152,7 @@ export function validateConfig(c: SynapseConfig) {
   validateActivity(c.activity);
   validateMemoryModel(c.memory.embeddingModel);
   validateMemoryModel(c.memory.rerankModel);
+  validateSpeech(c.speech);
   const unique = (values: string[], label: string) => {
     if (new Set(values).size !== values.length)
       throw new Error(`${label}不能重复`);

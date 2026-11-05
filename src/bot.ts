@@ -1,4 +1,4 @@
-import type { ConfigSource, PluginPaths, ErrorSink } from "./types.js";
+import type { ConfigSource, PluginPaths, ErrorSink, VoiceSender, VoiceReceipt } from "./types.js";
 import { fork } from "node:child_process";
 import { mkdir, cp, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
@@ -19,6 +19,7 @@ export class Bot {
   stderr: string;
   private activations = new Map<string, { resolve(): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
   private restarting?: Promise<void>;
+  private voices = new Map<string, { resolve(receipt: VoiceReceipt): void; reject(error: Error): void }>();
 
   constructor(
     paths: PluginPaths,
@@ -114,7 +115,14 @@ export class Bot {
     this.child.stderr?.on("data", (chunk) => {
       this.stderr = (this.stderr + chunk.toString()).slice(-6000);
     });
-    this.child.on("message", (msg: { type?: string; id?: string; error?: string; runId?: string; failed?: boolean; groupId?: string; eventId?: string }) => {
+    this.child.on("message", (msg: { type?: string; id?: string; error?: string; runId?: string; failed?: boolean; groupId?: string; eventId?: string; receipt?: VoiceReceipt }) => {
+      if (msg?.type === "voice-result") {
+        const pending = this.voices.get(msg.id);
+        if (pending) {
+          if (msg.error || !msg.receipt) { pending.reject(new Error(msg.error || "语音发送没有返回回执")); }
+          else { pending.resolve(msg.receipt); }
+        }
+      }
       if (msg?.type === "ready") { this.state = "running"; this.updateActivity(); }
       if (msg?.type === "activity-ack") {
         const pending = this.activations.get(msg.id);
@@ -136,6 +144,7 @@ export class Bot {
       this.state = this.stopping ? "stopped" : `exited (${code})`;
       for (const pending of this.activations.values()) { clearTimeout(pending.timer); pending.reject(new Error("Bot 进程已退出")); }
       this.activations.clear();
+      for (const pending of this.voices.values()) { pending.reject(new Error("Bot 进程已退出，语音发送未确认")); }
       if (!this.stopping) { void this.gateway.botDisconnected().catch(this.onError); }
     });
     // Parent disconnect guarantees the upstream child cannot outlive its owner.
@@ -167,8 +176,35 @@ export class Bot {
         if (e) this.onError(e);
       });
   }
+  /** 语音与取消使用同一 Bot 进程，等待平台回执后才通知模型发送成功。 */
+  sendVoice: VoiceSender = async (route, audio, signal) => {
+    signal.throwIfAborted();
+    const child = this.child;
+    if (!this.config().speech.enabled || !child?.connected || this.state !== "running") { throw new Error("语音功能已关闭或 Bot 尚未就绪"); }
+    const id = randomUUID();
+    const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(60000)]);
+    let abort: () => void;
+    try {
+      return await new Promise<VoiceReceipt>((resolve, reject) => {
+        abort = () => {
+          if (child.connected) { child.send({ type: "voice-cancel", id }, error => { if (error) { this.onError(new Error("取消语音发送的 IPC 通知失败")); } }); }
+          reject(requestSignal.reason);
+        };
+        this.voices.set(id, { resolve, reject });
+        requestSignal.addEventListener("abort", abort, { once: true });
+        if (requestSignal.aborted) { abort(); return; }
+        child.send({ type: "voice-send", id, route, audio: audio.toString("base64") }, error => {
+          if (error) { reject(new Error("Bot 语音发送 IPC 请求失败")); }
+        });
+      });
+    } finally {
+      requestSignal.removeEventListener("abort", abort);
+      this.voices.delete(id);
+    }
+  };
   async stop() {
     this.stopping = true;
+    for (const pending of this.voices.values()) { pending.reject(new Error("Bot 已停止，语音发送未确认")); }
     const child = this.child;
     this.child = null;
     if (child && child.exitCode === null) {

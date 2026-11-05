@@ -7,6 +7,7 @@ export interface ChatRoute {
   type: "user" | "group" | "discord";
   userId: string;
   groupId?: string;
+  channelId?: string;
   name: string;
   admin: boolean;
 }
@@ -91,6 +92,25 @@ export interface MemorySettings {
   skillPrompt: string;
   maxItems: number;
 }
+/** 语音合成使用独立凭据，音色与模型由配置限定，不接受模型更改服务地址。 */
+export interface SpeechConfig {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  voiceId: string;
+  modelId: string;
+  languageCode: string;
+  instructions: string;
+  maxCharacters: number;
+  timeoutSec: number;
+}
+/** 只有平台确认消息 ID 后，语音工具才能报告发送成功。 */
+export interface VoiceReceipt {
+  platform: "qq" | "discord";
+  messageId: string | number;
+}
+/** 发送目标绑定当前聊天路由；音频为 BreezeBlue 返回的完整 MP3。 */
+export type VoiceSender = (route: ChatRoute, audio: Buffer, signal: AbortSignal) => Promise<VoiceReceipt>;
 /** 进度卡片、审批与表情回应，写入机器人配置时并回聊天配置。 */
 export interface PresentationConfig {
   progressRateLimitSec: number;
@@ -121,6 +141,7 @@ export interface SynapseConfig {
   limits: LimitsConfig;
   github: GithubReviewConfig;
   memory: MemorySettings;
+  speech: SpeechConfig;
   modules: {
     management: {
       groups: number[];

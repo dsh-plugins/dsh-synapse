@@ -45,6 +45,28 @@ test("同一会话待发文字合并，群聊和同号私聊相互独立且共�
   assert.equal(f.sent.length, 1);
 });
 
+test("语音排队期间取消不会发送，执行中取消会中止 OneBot 请求，后续文字仍可发送", async t => {
+  const controller = new AbortController();
+  const f = fixture(t);
+  const record = [{ type: "record", data: { file: "base64://example" } }];
+  const first = f.queue.send("group", 123, text("前一条"));
+  const cancelled = f.queue.send("group", 123, record, { signal: controller.signal });
+  const following = f.queue.send("group", 123, text("后一条"));
+  controller.abort();
+  assert.deepEqual(await Promise.all([first, cancelled, following]), [1, undefined, 2]);
+  assert(f.requests.every(item => item.payload.message.every(segment => segment.type !== "record")));
+  const running = new AbortController(); let entered;
+  const ready = new Promise(resolve => { entered = resolve; });
+  const active = fixture(t, async (_action, _payload, signal) => {
+    entered(); await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
+    signal.throwIfAborted();
+  });
+  const pending = active.queue.send("private", 1, record, { signal: running.signal });
+  await ready; running.abort();
+  assert.equal(await pending, undefined);
+  assert.equal(active.sent.length, 0);
+});
+
 for (const operation of [false, true]) {
   test(`${operation ? "共享操作" : "消息请求"}同步启动耗时不缩短后续发送间隔`, async t => {
     let now = 1000;

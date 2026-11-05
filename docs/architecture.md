@@ -24,6 +24,7 @@
 | `limits` | 新会话权限预设、单轮超时与单轮步骤上限 |
 | `github` | Webhook 审查开关、Secret、Token、允许的仓库列表、评论发布与差异长度上限 |
 | `memory` | 长期记忆开关、检索条数、记忆库容量、嵌入与重排模型、记忆与 Skill 总结规则 |
+| `speech` | BreezeBlue 语音开关、服务地址、API Key、音色、模型、语言、风格、字符上限及合成超时 |
 | `modules` | 机器人功能：`chat`（对话行为）、`presentation`（进度、审批与表情回应）、`groupFeatures`（按群启用的五个功能）、`management`、`bili`、`github`、`welcome`、`discord`、`peakValley` |
 | `activity`、`mcpServers` | 群聊主动回复策略与 MCP 服务，由自定义面板编辑 |
 
@@ -61,6 +62,16 @@
   - 群聊挂载 `synapse_get_group_msg_history`，私聊挂载 `synapse_get_friend_msg_history`，目标群号或好友账号由宿主根据当前路由固定，单次可查 1–100 条，支持 NapCat（`message_seq` / `reverseOrder`）与 SnowLuma（`message_id` / `reverse_order`）分页参数。
   - `synapse_onebot_api` 接收相对 `path` 与 JSON `params`，由宿主拼接 OneBot HTTP 地址与 Token 并以 POST 发送（15 秒超时，响应上限 2 MB）。工具说明中注入可信发言者身份与管理员状态，原始 JSON 回执通过自定义 `render` 完整返回给模型。
   - 当发言者具备管理员权限时，群聊额外挂载 `synapse_group_mute`、`synapse_group_kick` 与 `synapse_group_whole_ban`，执行前再次核对实时管理员配置。
+
+## 语音合成与发送
+
+聊天会话在启用 `speech.enabled` 后挂载 `synapse_send_voice`，并注入按需主动使用语音的提示。工具只接受朗读文本与本次风格，发送路由来自网关提供的当前会话；审查和总结子代理不挂载该工具。
+
+`speech.ts` 使用 BreezeBlue 的 `POST /v1/text-to-speech/{voice_id}` 同步接口，以 `xi-api-key` 鉴权，固定请求 MP3。音频完整接收并验证后才交给 Bot；请求支持取消、配置超时和 10 MB 大小上限，错误信息不包含服务回执正文或凭据。音频只在内存中传递，不保存在临时文件中。
+
+宿主通过带唯一 ID 的 IPC 请求向 Bot 子进程发送音频。QQ 使用 `record` 段的 `base64://` 内容，交由现有独立会话队列发送，不与文字合并；NapCat/SnowLuma 负责平台所需的语音转码。Discord 复用已登录客户端的 REST 连接上传 `voice.mp3`，发送前校验缓存频道与 QQ 群的绑定。API Key 始终保留在宿主配置中。
+
+工具只有收到平台消息 ID 才返回 `sent=true`，同时发出 `voice.sent` 事件。原生 Harness 和 Bot 收尾会识别已成功发送的语音，允许模型结束时不附文字。取消信号通过 IPC 传至发送队列和 HTTP 请求；Bot 停止或退出时拒绝所有待确认的语音。未确认的发送可能已经送达，工具提示要求模型先核实，避免重复发送。
 
 ## QQ 发送队列与 GitHub 审查队列
 

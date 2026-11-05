@@ -75,11 +75,17 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     replyPerSentence: true,
   });
   Object.assign(c.modules.presentation, { reactionEnabled: false, progressAsImage: false });
+  const voiceAudio = Buffer.concat([Buffer.from("ID3"), Buffer.alloc(128)]);
+  Object.assign(c.speech, { enabled: true, apiKey: "fixture-speech-key", voiceId: "voc_example" });
   const requests = [];
   const http = createServer(async (req, res) => {
     let body = "";
     for await (const part of req) body += part;
     requests.push({ url: req.url, body: body ? JSON.parse(body) : {} });
+    if (req.url.startsWith("/speech/v1/text-to-speech/")) {
+      assert.equal(req.headers["xi-api-key"], c.speech.apiKey);
+      res.writeHead(200, { "Content-Type": "audio/mpeg" }); res.end(voiceAudio); return;
+    }
     res.setHeader("Content-Type", "application/json");
     res.end(
       JSON.stringify({
@@ -97,6 +103,7 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
   http.listen(0, "127.0.0.1");
   await once(http, "listening");
   c.connection.httpUrl = `http://127.0.0.1:${http.address().port}`;
+  c.speech.baseUrl = `${c.connection.httpUrl}/speech/v1`;
   const ws = new WebSocketServer({ port: 0, host: "127.0.0.1" });
   await once(ws, "listening");
   c.connection.wsUrl = `ws://127.0.0.1:${ws.address().port}`;
@@ -118,6 +125,11 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
   });
   const host = hostFixture(async ({ message, tools, signal }) => {
     const input = message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
+    if (input.includes("voice reply")) {
+      const result = await tools.find(tool => tool.name === "synapse_send_voice").execute({ text: "你好，这是一条语音回复。" }, { signal });
+      assert.equal(result.sent, true);
+      return "";
+    }
     if (input.includes("merge queued sentences")) {
       return "甲".repeat(190) + "。\n" + "乙".repeat(190) + "。";
     }
@@ -127,7 +139,7 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     }
     return "hello";
   });
-  const agent = new Agent({ loader: host.loader, config: () => c, paths: { home, profile, data, skills: path.join(profile, "skills") }, memory: {}, skills: { retrieve: async () => [] }, mcp: { available: async () => [] } });
+  const agent = new Agent({ loader: host.loader, config: () => c, paths: { home, profile, data, skills: path.join(profile, "skills") }, memory: {}, skills: { retrieve: async () => [] }, mcp: { available: async () => [] }, sendVoice: (route, audio, signal) => bot.sendVoice(route, audio, signal) });
   const state = new ChatState(path.join(data, "chat-state.sqlite"));
   const activity = new ChatActivity({ state, config: () => c, images: new ChatImages({ home, profile, data }, state, () => c), cloud: new AsyncWordCloud(path.join(data, "chat-state.sqlite")) });
   await activity.recover((...args) => agent.harness.hasInput(...args));
@@ -247,6 +259,20 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     assert.equal(queries, 1);
     await waitFor(() => requests.some((r) => r.url === "/send_group_msg" && JSON.stringify(r.body).includes("example-release")));
     assert.deepEqual(resets, ["chat:group:123"]);
+    const speechStart = requests.length;
+    for (const type of ["group", "private"]) {
+      socket.send(JSON.stringify({ post_type: "message", message_type: type, sub_type: "friend",
+        ...(type === "group" ? { group_id: 123 } : {}), user_id: 1, self_id: 42, message_id: type === "group" ? 301 : 302,
+        raw_message: "voice reply", message: [{ type: "text", data: { text: "voice reply" } }], sender: { user_id: 1, nickname: "tester" },
+      }));
+      await waitFor(() => requests.slice(speechStart).some(item => item.url === `/send_${type === "group" ? "group" : "private"}_msg` && item.body.message?.some(segment => segment.type === "record")), 12000);
+    }
+    const voices = requests.slice(speechStart).filter(item => item.body.message?.some(segment => segment.type === "record"));
+    assert.equal(voices.length, 2);
+    assert(voices.every(item => item.body.message.length === 1 && item.body.message[0].data.file === `base64://${voiceAudio.toString("base64")}`));
+    await waitFor(() => gateway.runs.size && [...gateway.runs.values()].every(run => run.done && (!run.groupId || run.delivered)), 12000);
+    assert(!requests.slice(speechStart).some(item => /未收到|执行失败|没有返回文本/.test(JSON.stringify(item.body))));
+    assert.equal(requests.filter(item => item.url.startsWith("/speech/v1/text-to-speech/")).length, 2);
     assert.deepEqual(errors, []);
   } catch (e) {
     const log = await readFile(

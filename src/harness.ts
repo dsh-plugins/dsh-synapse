@@ -67,6 +67,7 @@ export class Harness {
     title?: string,
     instructions: InstructionFile[] = [],
     submission?: NativeSubmission,
+    externalReply?: () => boolean,
   ) {
     const task = this.execute(
       system,
@@ -81,6 +82,7 @@ export class Harness {
       title,
       instructions,
       submission,
+      externalReply,
     );
     this.tasks.add(task);
     void task.finally(() => this.tasks.delete(task)).catch(() => {});
@@ -136,6 +138,7 @@ export class Harness {
     title?: string,
     instructions: InstructionFile[] = [],
     submission?: NativeSubmission,
+    externalReply?: () => boolean,
   ): Promise<string> {
     const config = this.config();
     const signal = AbortSignal.any([
@@ -297,7 +300,7 @@ export class Harness {
       }
       signal.throwIfAborted();
       if (turn.error) throw turn.error;
-      if (!turn.output) {
+      if (!turn.output && !externalReply?.()) {
         if (this.isArchived(handle.agent.id)) {
           throw new Error(`DSH 会话已归档，下一条消息将自动新建会话（${handle.agent.id}）`);
         }

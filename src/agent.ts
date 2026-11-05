@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   AgentEvent,
   RunContext,
+  VoiceSender,
 } from "./types.js";
 import { instructionFor } from "./files.js";
 import { Harness, type AskApproval } from "./harness.js";
@@ -13,6 +14,7 @@ import { SessionQueue } from "./session-queue.js";
 import { learningTools } from "./native-tools.js";
 import { learningDelegations } from "./learning.js";
 import { chatTools } from "./chat-tools.js";
+import { speechTools } from "./speech.js";
 export class Agent {
   private queue = new SessionQueue();
   harness: Harness;
@@ -22,6 +24,7 @@ export class Agent {
   skills: import("./files.js").SkillStore;
   mcp: import("./mcp.js").McpManager;
   private loader: HostAPI;
+  private sendVoice?: VoiceSender;
 
   constructor({
     loader,
@@ -30,6 +33,7 @@ export class Agent {
     memory,
     skills,
     mcp,
+    sendVoice,
   }: {
     loader: HostAPI;
     config: ConfigSource;
@@ -37,8 +41,9 @@ export class Agent {
     memory: import("./memory.js").Memory;
     skills: import("./files.js").SkillStore;
     mcp: import("./mcp.js").McpManager;
+    sendVoice?: VoiceSender;
   }) {
-    Object.assign(this, { loader, config, paths, memory, skills, mcp });
+    Object.assign(this, { loader, config, paths, memory, skills, mcp, sendVoice });
     this.harness = new Harness(loader, config, paths, mcp);
   }
   async context(input, channel) {
@@ -83,11 +88,21 @@ export class Agent {
           (await this.context(input, channel)) +
           (channelInstructions
             ? "\n\n通道适配规则：\n" + channelInstructions
+            : "") +
+          (channel === "chat" && context.route && this.sendVoice && this.config().speech.enabled
+            ? "\n\n语音回复：可根据对话需要主动调用 synapse_send_voice，用自然口语回复当前会话。语音工具确认发送成功后，避免重复发送同一段文字；本轮可以仅发送语音。合成失败时根据工具错误继续用文字回复，不要谎称语音已发送，也不要盲目重试未确认的发送。"
             : "");
+        let voiceSent = false;
         const tools = [
           ...learningTools(this.config, this.memory, this.skills, channel).filter(tool => !tool.name.endsWith("_save")),
           ...learningDelegations(this.loader, this.config, this.memory, this.skills, channel),
           ...(channel === "chat" ? chatTools(this.config, this.paths, context.route) : []),
+          ...(channel === "chat" ? speechTools(this.config, context.route, this.sendVoice ? async (route, audio, signal) => {
+            const receipt = await this.sendVoice(route, audio, signal);
+            voiceSent = true;
+            onEvent("voice.sent", { ...receipt });
+            return receipt;
+          } : undefined) : []),
           ...(channel === "chat" ? await this.mcp.available() : []),
         ];
         const instruction = await instructionFor(this.paths, channel, queuedSignal);
@@ -104,6 +119,7 @@ export class Agent {
           context.title,
           instruction ? [instruction] : [],
           context.submission,
+          () => voiceSent,
         );
         return output;
       },

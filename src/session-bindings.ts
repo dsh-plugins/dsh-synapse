@@ -33,9 +33,12 @@ export function chatRunContext(key: string, value: unknown): RunContext {
   }
   const name = typeof raw.name === "string"
     ? raw.name.replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, 256) : "";
+  if (raw.channelId !== undefined && (raw.type !== "discord" || typeof raw.channelId !== "string" || !/^\d+$/.test(raw.channelId))) {
+    throw Object.assign(new Error("Discord 频道标识无效"), { status: 400 });
+  }
   return {
     title: `【${prefix}】${name}（${id}）`,
-    route: { type: raw.type, userId: raw.userId, groupId: raw.groupId, name, admin: raw.admin === true },
+    route: { type: raw.type, userId: raw.userId, groupId: raw.groupId, ...(raw.channelId ? { channelId: raw.channelId } : {}), name, admin: raw.admin === true },
   };
 }
 

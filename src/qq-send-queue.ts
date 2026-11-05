@@ -1,7 +1,7 @@
 /** 用于排队发送的 OneBot 消息段，保留协议端的段数据。 */
 export interface QQSegment { type: string; data?: any }
 /** 区分桥接、通知及需要独立消息 ID 的发送请求。 */
-export interface QQSendOptions { fromBridge?: boolean; fromWebhook?: boolean; merge?: boolean }
+export interface QQSendOptions { fromBridge?: boolean; fromWebhook?: boolean; merge?: boolean; signal?: AbortSignal }
 interface SendTask {
   parts: QQSegment[][];
   options: QQSendOptions;
@@ -38,13 +38,13 @@ export class QQSendQueue {
   constructor(private options: QueueOptions, private intervalMs = 2000) {}
 
   send(type: "group" | "private", id: string | number, message: QQSegment[], options: QQSendOptions = {}): Promise<number | undefined> {
-    if (this.closed || !message.length) {
+    if (this.closed || !message.length || options.signal?.aborted) {
       return Promise.resolve(undefined);
     }
     const key = `${type}:${id}`;
     const outbox = this.get(key, type, id);
     const parts = [structuredClone(message)];
-    const mergeable = options.merge !== false && !options.fromBridge && message.every(segment => mergeableTypes.has(segment.type)
+    const mergeable = !options.signal && options.merge !== false && !options.fromBridge && message.every(segment => mergeableTypes.has(segment.type)
       && (segment.type !== "node" || typeof segment.data?.content === "string" || Array.isArray(segment.data?.content)));
     return new Promise(resolve => {
       const tail = outbox.tasks.at(-1);
@@ -183,6 +183,7 @@ export class QQSendQueue {
   }
 
   private prepare(task: SendTask): PreparedMessage {
+    task.options.signal?.throwIfAborted();
     const limits = this.options.limits();
     const expand = (segment: QQSegment): QQSegment[] => {
       if (segment.type !== "node") {
@@ -241,8 +242,9 @@ export class QQSendQueue {
         }
         payload = { [`${outbox.type === "group" ? "group" : "user"}_id`]: outbox.id, messages: nodes };
       }
-      this.shutdown.signal.throwIfAborted();
-      id = await this.options.request(`send_${outbox.type}_${forward ? "forward_msg" : "msg"}`, payload, this.shutdown.signal);
+      const signal = task.options.signal ? AbortSignal.any([this.shutdown.signal, task.options.signal]) : this.shutdown.signal;
+      signal.throwIfAborted();
+      id = await this.options.request(`send_${outbox.type}_${forward ? "forward_msg" : "msg"}`, payload, signal);
       if (id === undefined) {
         throw new Error(`QQ ${outbox.type}:${outbox.id} 发送失败，OneBot 未返回消息 ID`);
       }
