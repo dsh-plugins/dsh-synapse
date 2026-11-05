@@ -63,7 +63,7 @@
 
 ## 语音回复
 
-在 **语音合成（BreezeBlue）** 中填写 API Key 和音色 ID（`voice_id`），开启 **允许 Bot 主动发送语音** 后保存。音色 ID 可从 BreezeBlue 音色库获取，接口说明见 [BreezeBlue 文档](https://docs.breezeblue.ai/api-reference/text-to-speech/convert-text-to-speech)。
+在 **语音合成（BreezeBlue）** 中点击 **点击获取 API KEY** 打开密钥获取页面，填写 API Key，开启 **允许 Bot 主动发送语音** 后保存。默认音色 ID（`voice_id`）为 `voc_u3nxkd5578wc`，可改为音色库中的其他音色；接口说明见 [BreezeBlue 文档](https://docs.breezeblue.ai/api-reference/text-to-speech/convert-text-to-speech)。
 
 - 模型可以根据对话内容主动选择语音，也可以响应「用语音回复我」这样的请求。QQ 群和私聊收到语音消息，Discord 当前频道收到 MP3 音频附件。
 - 默认使用 `breeze-tts-2` 和中文 `zh`，可调整语音模型、语言及默认朗读风格。模型可为单次朗读指定语气与情绪，发送目标固定为当前会话。
@@ -72,7 +72,7 @@
 
 ## 人设、记忆、Skill 与工具
 
-- **人设与补充规则**：在 `<profile>/` 或 `$DSH_HOME/` 下放置 `SOUL.md` 可自定义聊天人设，放置 `AGENTS.md` 可自定义审查规则（`<profile>/` 优先），保存后对下一次请求生效。
+- **人设与补充规则**：默认使用内置的「大肥鱼」聊天人设与 PR 审查规则。在 `<profile>/` 或 `$DSH_HOME/` 下放置 `SOUL.md` 可自定义聊天人设，放置 `AGENTS.md` 可自定义审查规则（`<profile>/` 优先），保存后对下一次请求生效。自定义文件会覆盖对应内置规则；空文件表示关闭该段规则。
 - **记忆与 Skill**：聊天与审查记忆相互独立。可在 **长期记忆与 Skill → 从 Hermes 导入记忆** 中粘贴 Markdown 批量导入，在 **记忆检索** 中搜索已有记忆，或在 **Skill 管理** 中预览、新增和编辑 Skill。
 - **嵌入与重排模型**：在 **长期记忆与 Skill** 中分别选择本机运行或在线服务。在线模式填写服务地址、API Key 与模型名称；SiliconFlow 地址为 `https://api.siliconflow.cn/v1`。开启 **检索后重新排序** 后才会显示并使用重排模型。嵌入输出维度默认 `0`，由模型决定；模型切换后会重建向量索引并保留记忆正文。在线服务会接收记忆文本和检索词，并可能产生调用费用。
 - **内置工具与 MCP**：聊天模型可直接查询 GitHub Issue/PR、B 站视频、Minecraft 版本与服务器状态、中文 Minecraft 维基、Modrinth 模组版本及当前会话的 QQ 聊天记录，也可在核对发言者权限后调用 OneBot API 或执行群管理操作。在 **MCP 管理** 中可配置并测试 `stdio`、`Streamable HTTP` 或 `SSE` 服务，勾选允许聊天模型自动调用的工具。

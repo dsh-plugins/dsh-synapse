@@ -89,6 +89,8 @@ export async function instructionFor(paths: PluginPaths, channel: Channel, signa
       if (e.code !== "ENOENT") { throw e; }
     }
   }
+  const absolutePath = fileURLToPath(new URL(`../../defaults/${name}`, import.meta.url));
+  return { absolutePath, displayPath: `<synapse>/defaults/${name}`, content: await readFile(absolutePath, { encoding: "utf8", signal }) };
 }
 export function skillName(name) {
   if (

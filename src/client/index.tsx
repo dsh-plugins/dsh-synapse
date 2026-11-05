@@ -3,6 +3,7 @@
  */
 import * as React from "react";
 import type { ConfigDialogProps, DshLoaderUi } from "@dsh-plugin/dsh-loader/client";
+import { Arco } from "@dsh-plugin/dsh-loader/client";
 import { moduleFields } from "../feature-config.js";
 import { Fields, DIALOG_CSS, setAt } from "./fields.js";
 import type { SynapseConfig } from "../types.js";
@@ -16,6 +17,10 @@ export const inject = ["dshLoaderUi"];
 
 function StyleTag() {
   return <style data-synapse-config="">{DIALOG_CSS}</style>;
+}
+
+function SpeechApiKeyLink() {
+  return <Arco.Link href="https://breezeblue.ai/zh?code=MQC8R5" target="_blank" rel="noopener noreferrer">点击获取 API KEY</Arco.Link>;
 }
 
 function ModulesEditor({
@@ -49,7 +54,7 @@ export function apply(ctx: {
     title: "编辑聊天与通知功能",
     component: ModulesEditor,
   });
-  for (const [id, component] of [["skills", SkillsPanel], ["mcp", McpPanel], ["memory-import", MemoryImportPanel], ["reviews", ReviewsPanel], ["activity", ActivityPanel]] as const) {
+  for (const [id, component] of [["skills", SkillsPanel], ["mcp", McpPanel], ["memory-import", MemoryImportPanel], ["reviews", ReviewsPanel], ["activity", ActivityPanel], ["speech-api-key", SpeechApiKeyLink]] as const) {
     ctx.dshLoaderUi.config.registerPanel(ctx, { id, configId: "dsh-synapse", component });
   }
   for (const [field, label] of [["memoryPrompt", "记录规则"], ["skillPrompt", "总结规则"]] as const) {

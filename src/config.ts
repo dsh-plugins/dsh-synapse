@@ -29,7 +29,11 @@ const memoryModel = (key: string, label: string, model: string, embedding = fals
       description: "0 表示使用模型默认维度。只在服务支持时填写，例如 SiliconFlow 的 Qwen3 嵌入模型。" }] : []),
   ], COLLAPSED);
 };
-const MEMORY_PROMPT = "在对话或审查中留意值得长期保留的信息，如已核实的事实、用户偏好、长期约束和关键决定。发现此类信息时，先调用 synapse_memory_search 查重，再调用 synapse_memory_save 写入当前通道的记忆库，不必等用户主动要求。记忆内容应简明具体，需要时注明适用范围；切勿记录密钥、凭据、未经核实的推测或临时状态。仅在工具返回写入成功后才告知用户已保存；日常闲聊不必记录。";
+const MEMORY_PROMPT = `你应主动捕捉并珍藏与用户相处中的点点滴滴。在对话或交互中，留意那些能让你更懂用户的信息，包括：用户的个人事实、生活习惯、喜好与雷区、常聊的话题、你们之间的共同经历、内部梗、重要约定，以及长期偏好与关键决定。
+发现这些值得留存的片段时，先调用 synapse_memory_search 检索已有记忆（避免重复并做好上下文衔接），再调用 synapse_memory_save 将新内容写入当前通道的 RAG 库，无需等待用户提醒“记住”。
+记录应具体、鲜活且有依据，必要时注明相关人物、语境或适用条件；不要记录密钥、敏感凭据或毫无主旨的纯水词（如单句“哈哈”、“在吗”）。只有工具确认写入成功后才能表现或声称已记住。
+无论是私聊还是群聊，记录记忆时，你都应该明确区分这个记忆是和哪个用户一起的，避免混淆与多个用户的记忆。
+记录记忆是没有成本的，可以自由的记忆任何内容。`;
 const SKILL_PROMPT = "在完成任务后，将本次已验证通过且后续可复用的操作步骤整理为 Skill。先调用 synapse_skill_list 和 synapse_skill_read 查阅现有内容，再调用 synapse_skill_save 保存；新建 Skill 使用当前通道的 auto-chat- 或 auto-review- 前缀，更新已有条目时传入读取到的 revision。写明适用场景、前置条件、操作步骤、验证方式与注意事项，避免重复创建。切勿将猜测、未验证方案、密钥或单次对话保存为 Skill，也不得借此扩大工具权限。仅在工具返回成功后才确认已保存。";
 
 export const template = defineConfig({
@@ -100,8 +104,9 @@ export const template = defineConfig({
     object("speech", "语音合成（BreezeBlue）", [
       { ...flag("enabled", "允许 Bot 主动发送语音"), description: "开启后模型可调用语音工具回复当前 QQ 群、私聊或 Discord 频道；合成内容会发送给 BreezeBlue 并消耗账户额度。" },
       text("baseUrl", "服务地址（Base URL）", "https://api.breeze.blue/v1"),
+      { ...group("获取 API Key", []), panel: "speech-api-key" },
       text("apiKey", "API Key", "", "password"),
-      { ...text("voiceId", "音色 ID"), description: "填写 BreezeBlue 音色库中的 voice_id，使用你有权使用的音色。" },
+      { ...text("voiceId", "音色 ID", "voc_u3nxkd5578wc"), description: "填写 BreezeBlue 音色库中的 voice_id，使用你有权使用的音色。" },
       text("modelId", "语音模型 ID", "breeze-tts-2"),
       { ...text("languageCode", "语言代码", "zh"), description: "中文 zh、英文 en；留空时由所选模型处理语言。模型和语言须相互兼容。" },
       { ...text("instructions", "默认朗读风格", "自然、亲切地说话，语速适中。", "textarea"), description: "用与正文相同的语言描述语气和情绪，模型可以针对本次朗读调整，最多 2000 字符。" },

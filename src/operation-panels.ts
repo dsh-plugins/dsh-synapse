@@ -5,6 +5,7 @@ import { activityField } from "./activity-config.js";
 const channel = () => select("channel", "记忆分类", [["chat", "聊天（QQ / Discord 共享）"], ["review", "GitHub 审查"]]);
 
 export const panels: ConfigPanel[] = [
+  { id: "speech-api-key", title: "获取 BreezeBlue API Key", custom: true, fields: [], operations: [] },
   {
     id: "activity", title: "群聊上下文与主动回复", custom: true,
     fields: [{ ...activityField, key: "settings", hidden: false }, text("groupId", "群号"), text("type", "日志类型"), text("from", "开始时间"), text("to", "结束时间"), num("beforeId", "上一页 ID", 0)],
