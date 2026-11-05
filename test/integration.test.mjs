@@ -259,6 +259,7 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     assert.equal(queries, 1);
     await waitFor(() => requests.some((r) => r.url === "/send_group_msg" && JSON.stringify(r.body).includes("example-release")));
     assert.deepEqual(resets, ["chat:group:123"]);
+    await waitFor(() => requests.some(item => item.url === "/send_group_msg" && JSON.stringify(item.body).includes("上下文已清除")), 12000);
     const speechStart = requests.length;
     for (const type of ["group", "private"]) {
       socket.send(JSON.stringify({ post_type: "message", message_type: type, sub_type: "friend",
