@@ -72,6 +72,7 @@ export function registerOperations(
       return { value: { settings: saved.value.activity as unknown as ConfigValue }, resource: { id: "chat-activity", revision: saved.revision } };
     },
     "activity.status": s => ({ value: { items: s.activity.status() } }),
+    "activity.words": async (s, { input, signal }) => ({ value: await s.activity.wordCloud(String(input.groupId || ""), signal) as unknown as ConfigValue }),
     "activity.logs": (s, { input }) => {
       const date = (value: unknown) => {
         if (!value) { return undefined; }

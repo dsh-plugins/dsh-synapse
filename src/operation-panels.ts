@@ -13,6 +13,7 @@ export const panels: ConfigPanel[] = [
       { id: "activity.load", input: [], readOnly: true },
       { id: "activity.save", input: ["settings"], requiresRevision: true },
       { id: "activity.status", input: [], readOnly: true },
+      { id: "activity.words", input: ["groupId"], readOnly: true },
       { id: "activity.logs", input: ["groupId", "type", "from", "to", "beforeId"], readOnly: true },
     ],
   },

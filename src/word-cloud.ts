@@ -1,10 +1,22 @@
 import { Worker } from "node:worker_threads";
 import type { ActivitySettings } from "./activity-config.js";
 
+/** 单词按消息去重后的出现次数与按时间衰减的词频。 */
+export interface WordFrequency { word: string; weight: number; messages: number }
+/** 统计快照保留低频词和屏蔽词，并标记实际参与加成的热词。 */
+export interface CloudTerm extends WordFrequency { eligible: boolean; blocked: boolean; boost: number }
+/** 设置页使用同一时刻的统计和群策略计算悬浮概率。 */
+export interface GroupWordCloud {
+  groupId: string; name: string; at: number; windowHours: number; halfLifeHours: number;
+  enabled: boolean; baseProbabilityBps: number;
+  items: (CloudTerm & { probabilityBps: number })[];
+}
+
 /** 词云工作线程的有界等待接口，故障只影响本次加成。 */
 export interface WordCloud {
   message(groupId: string, messageId: string, sender: string, text: string, time: number, now: number, settings: ActivitySettings): Promise<{ boost: number; words: string[]; degraded?: boolean }>;
   removeUsers(users: string[]): Promise<void>;
+  snapshot(groupId: string, now: number, settings: ActivitySettings): Promise<CloudTerm[]>;
   recover?(now: number): Promise<void>;
   close(): Promise<void>;
 }
@@ -44,6 +56,11 @@ export class AsyncWordCloud implements WordCloud {
 
   message(groupId: string, messageId: string, sender: string, text: string, time: number, now: number, settings: ActivitySettings) {
     return this.request({ action: "message", groupId, messageId, sender, text, time, now, settings });
+  }
+  async snapshot(groupId: string, now: number, settings: ActivitySettings): Promise<CloudTerm[]> {
+    const result = await this.request({ action: "snapshot", groupId, now, settings }, 5000);
+    if (!Array.isArray(result)) { throw new Error("词云统计暂时不可用，请稍后重试"); }
+    return result;
   }
   async removeUsers(users: string[]) { await this.request({ action: "remove", users }, 5000); }
   async recover(now: number) { await this.request({ action: "recover", now }, 5000); }

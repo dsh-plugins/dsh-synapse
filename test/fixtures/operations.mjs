@@ -8,8 +8,9 @@ import { SkillStore } from "../../lib/host/files.js";
 import { Memory } from "../../lib/host/memory.js";
 import { ChatState } from "../../lib/host/chat-state.js";
 import { ChatActivity } from "../../lib/host/chat-activity.js";
+import { AsyncWordCloud } from "../../lib/host/word-cloud.js";
 
-export async function operationFixture({ serviceAvailable = true } = {}) {
+export async function operationFixture({ serviceAvailable = true, wordCloud = false } = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), "synapse-operations-"));
   const profile = path.join(home, "profiles", "test");
   const paths = {
@@ -22,9 +23,11 @@ export async function operationFixture({ serviceAvailable = true } = {}) {
   const store = new ConfigStore(profile),
     handle = await store.register(null, template);
   const config = () => handle.get().value;
+  const cloud = wordCloud ? new AsyncWordCloud(path.join(paths.data, "chat-state.sqlite"))
+    : { message: async () => ({ boost: 0, words: [] }), snapshot: async () => [], removeUsers: async () => {}, close: async () => {} };
   const activity = new ChatActivity({ state: new ChatState(path.join(paths.data, "chat-state.sqlite")), config,
     images: { start: async () => {}, process: async () => {}, collect: async () => {}, close: async () => {} },
-    cloud: { message: async () => ({ boost: 0, words: [] }), removeUsers: async () => {}, close: async () => {} } });
+    cloud });
   const service = {
     config,
     activity,
@@ -72,6 +75,7 @@ export async function operationFixture({ serviceAvailable = true } = {}) {
     handle,
     service,
     paths,
+    cloud,
     invoke: (id, input = {}, resource, signal) =>
       store.invoke(
         "dsh-synapse",

@@ -2,6 +2,7 @@ import * as React from "react";
 import { Arco, type ConfigPanelProps } from "@dsh-plugin/dsh-loader/client";
 import type { ActivityConfig, ActivityGroup, ActivitySettings } from "../activity-config.js";
 import { EditorDialog, ErrorNotice, MANAGER_CSS, TableArea, useRequests } from "./shared.js";
+import { WordCloudDialog } from "./word-cloud.js";
 
 const time = (value: number) => value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "无";
 const types = { check: "检查", roll: "掷骰", hit: "命中", skip: "跳过", submit: "提交", commit: "原生确认", send: "发送", failure: "失败", config: "配置变更", recovery: "恢复" };
@@ -68,6 +69,7 @@ export function ActivityPanel({ view, client }: ConfigPanelProps) {
   const [selected, setSelected] = React.useState<number>(), [newGroup, setNewGroup] = React.useState<number>();
   const [filter, setFilter] = React.useState({ groupId: "", type: "", from: "", to: "" });
   const [detail, setDetail] = React.useState<any>();
+  const [cloudGroup, setCloudGroup] = React.useState<{ groupId: string; name: string }>();
   const invoke = (operation: string, input = {}, revision?: any, write = false) => request.run(signal => client.invoke(view.template.id, operation, { input, ...(revision ? { resource: revision } : {}) }, signal), write);
   const refresh = async () => {
     const result = await invoke("activity.status");
@@ -105,6 +107,7 @@ export function ActivityPanel({ view, client }: ConfigPanelProps) {
       { title: "概率回复", render: (_value, row) => <>{row.probabilityEnabled ? "启用" : "关闭"}<br/>分钟 {row.probabilityMinute}/{row.limits.probability.perMinute}，小时 {row.probabilityHour}/{row.limits.probability.perHour}<br/>冷却至 {time(row.probabilityCooldownUntil)}</> },
       { title: "空闲消息", render: (_value, row) => <>{row.idleEnabled ? "启用" : "关闭"}<br/>小时 {row.idleHour}/{row.limits.idle.perHour}，每日 {row.idleDay}/{row.limits.idle.perDay}<br/>冷却至 {time(row.idleCooldownUntil)}</> },
       { title: "下次空闲期限", render: (_value, row) => <>{time(row.windowDue)}{row.pendingDue && <><br/>待发送 {time(row.pendingDue)}</>}</> },
+      { title: "操作", render: (_value, row) => <Arco.Button size="small" onClick={() => setCloudGroup({ groupId: row.groupId, name: row.name })}>显示词云</Arco.Button> },
     ]}/></TableArea>
     <Arco.Divider orientation="left">触发与配置日志</Arco.Divider>
     <div className="synapse-activity-filter"><Arco.Input aria-label="筛选群号" placeholder="群号（留空查全部）" value={filter.groupId} onChange={value => setFilter({ ...filter, groupId: value })}/>
@@ -119,6 +122,7 @@ export function ActivityPanel({ view, client }: ConfigPanelProps) {
       { title: "操作", render: (_value, row) => <Arco.Button size="small" onClick={() => setDetail(row)}>详情</Arco.Button> },
     ]}/></TableArea>
     {detail && <EditorDialog title="触发日志详情" close={() => setDetail(undefined)}><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(detail, null, 2)}</pre></EditorDialog>}
+    {cloudGroup && <WordCloudDialog key={cloudGroup.groupId} {...cloudGroup} view={view} client={client} close={() => setCloudGroup(undefined)}/>}
     {draft && <EditorDialog title={group ? `群策略 · ${selected}` : "群聊策略 · 全局默认值"} locked={request.writing} close={() => setDraft(undefined)}
       actions={<Arco.Button type="primary" loading={request.writing} onClick={() => { void save(); }}>保存</Arco.Button>}>
       <ErrorNotice error={request.error}/>

@@ -6,7 +6,7 @@ import type { ChatImages } from "./chat-images.js";
 import { ChatState } from "./chat-state.js";
 import type { GroupMessage, GroupState } from "./chat-state.js";
 import type { ConfigSource, NativeSubmission, SynapseConfig } from "./types.js";
-import type { WordCloud } from "./word-cloud.js";
+import type { WordCloud, GroupWordCloud } from "./word-cloud.js";
 import { abortable } from "./abort.js";
 
 /** 主动事件只包含可信群路由，不借用真人的管理员身份。 */
@@ -449,6 +449,17 @@ export class ChatActivity {
         this.log(groupId, "config", "群聊策略热更新", { source, details: { revision, previous: before, current: after } });
       }
     }
+  }
+
+  async wordCloud(groupId: string, signal?: AbortSignal): Promise<GroupWordCloud> {
+    signal?.throwIfAborted();
+    const group = this.state.getGroup(groupId);
+    if (!/^[1-9]\d*$/.test(groupId) || !group || !this.enabled(groupId)) { throw new Error("群聊不存在或未启用聊天"); }
+    const at = this.now(), settings = structuredClone(groupSettings(this.config().activity, groupId));
+    const items = await abortable(this.cloud.snapshot(groupId, at, settings), signal);
+    return { groupId, name: group.name, at, windowHours: settings.words.windowHours, halfLifeHours: settings.words.halfLifeHours,
+      enabled: settings.probabilityEnabled, baseProbabilityBps: settings.probability.baseBps,
+      items: items.map(item => ({ ...item, probabilityBps: item.blocked ? 0 : finalProbability(settings, item.boost) })) };
   }
 
   status() {

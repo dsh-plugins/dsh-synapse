@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { withoutUrls } from "./chat-images.js";
 import type { ActivitySettings } from "./activity-config.js";
+import type { WordFrequency, CloudTerm } from "./word-cloud.js";
 
 const stopWords = new Set("的 了 和 是 我 你 他 她 它 我们 你们 他们 这个 那个 一个 这 那 就 都 也 在 有 没有 啊 呢 吗 吧 哦 嗯 哈哈 哈哈哈 好 可以 什么 怎么 还是 然后 因为 所以 但是 如果 以及 with from this that the and for are was you your http https www com qq".split(" "));
 const segmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
@@ -25,22 +26,42 @@ export class CloudStore {
     `);
   }
 
-  evaluate(groupId: string, text: string, now: number, settings: ActivitySettings): { boost: number; words: string[]; top: { word: string; weight: number; messages: number }[] } {
+  private frequencies(groupId: string, now: number, settings: ActivitySettings): WordFrequency[] {
     const since = now - settings.words.windowHours * 3600000;
     const rows: any[] = this.db.prepare("SELECT minute,word,SUM(n) AS n FROM cloud_counts WHERE group_id=? AND minute>=? GROUP BY minute,word").all(groupId, Math.ceil(since / 60000));
-    const scores = new Map<string, { word: string; weight: number; messages: number }>();
+    const scores = new Map<string, WordFrequency>();
     for (const row of rows) {
-      if (settings.blockedWords.some(word => row.word.includes(word.normalize("NFKC").toLowerCase()))) { continue; }
       const score = scores.get(row.word) ?? { word: row.word, weight: 0, messages: 0 };
       score.messages += row.n;
       score.weight += row.n * Math.pow(0.5, Math.max(0, now - row.minute * 60000) / (settings.words.halfLifeHours * 3600000));
       scores.set(row.word, score);
     }
-    const top = [...scores.values()].filter(item => item.messages >= 3).sort((a, b) => b.weight - a.weight || a.word.localeCompare(b.word)).slice(0, 20);
+    return [...scores.values()].sort((a, b) => b.weight - a.weight || a.word.localeCompare(b.word));
+  }
+
+  private blocked(word: string, settings: ActivitySettings): boolean {
+    return settings.blockedWords.some(item => word.includes(item.normalize("NFKC").toLowerCase()));
+  }
+  private top(items: WordFrequency[], settings: ActivitySettings): WordFrequency[] {
+    return items.filter(item => item.messages >= 3 && !this.blocked(item.word, settings)).slice(0, 20);
+  }
+  private boost(weight: number, highest: number, settings: ActivitySettings): number {
+    return highest > 0 ? Math.min(2, settings.words.maxBoostPercent / 100) * weight / highest : 0;
+  }
+
+  evaluate(groupId: string, text: string, now: number, settings: ActivitySettings): { boost: number; words: string[]; top: WordFrequency[] } {
+    const top = this.top(this.frequencies(groupId, now, settings), settings);
     const tokens = new Set(cloudTokens(text));
     const matched = top.filter(item => tokens.has(item.word));
     const weight = Math.max(0, ...matched.map(item => item.weight));
-    return { boost: top.length ? Math.min(2, settings.words.maxBoostPercent / 100) * weight / top[0].weight : 0, words: matched.map(item => item.word), top };
+    return { boost: this.boost(weight, top[0]?.weight ?? 0, settings), words: matched.map(item => item.word), top };
+  }
+
+  snapshot(groupId: string, now: number, settings: ActivitySettings): CloudTerm[] {
+    const items = this.frequencies(groupId, now, settings), top = this.top(items, settings);
+    const eligible = new Set(top.map(item => item.word));
+    return items.map(item => ({ ...item, eligible: eligible.has(item.word), blocked: this.blocked(item.word, settings),
+      boost: eligible.has(item.word) ? this.boost(item.weight, top[0]?.weight ?? 0, settings) : 0 }));
   }
 
   observe(groupId: string, messageId: string, sender: string, text: string, time: number, now: number) {

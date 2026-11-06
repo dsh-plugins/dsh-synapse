@@ -9,6 +9,8 @@ parentPort.on("message", request => {
       // 必须先查询旧统计，再记入当前消息。
       result = cloud.evaluate(request.groupId, request.text, request.now, request.settings);
       cloud.observe(request.groupId, request.messageId, request.sender, request.text, request.time, request.now);
+    } else if (request.action === "snapshot") {
+      result = cloud.snapshot(request.groupId, request.now, request.settings);
     } else if (request.action === "recover") {
       cloud.recover(request.now);
     } else if (request.action === "remove") {
