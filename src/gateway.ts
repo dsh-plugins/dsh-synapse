@@ -15,6 +15,7 @@ interface Run {
   approval?: (answer: ApprovalAnswer) => void;
   approvalQueue: Promise<unknown>;
   groupId?: string;
+  muteGeneration?: number;
   batchId?: string;
   triggerId?: string;
   failed?: boolean;
@@ -37,7 +38,8 @@ export class Gateway {
   gc: NodeJS.Timeout;
   background = new Set<Promise<unknown>>();
   shutdown = new AbortController();
-  private preparing = new Map<string, { controller: AbortController; done: Promise<void> }>();
+  private preparing = new Map<string, { groupId: string; muteGeneration: number; controller: AbortController; done: Promise<void> }>();
+  private mutedGenerations = new Map<string, number>();
   botEpoch?: string;
   private disconnecting?: Promise<void>;
 
@@ -91,6 +93,7 @@ export class Gateway {
         return json(res, observed);
       }
       if (action === "identity") { this.activity.identity(data.selfId); return json(res, { ok: true }); }
+      if (action === "muted") { await this.groupMuted(String(data.groupId), data.throughGeneration); return json(res, { ok: true }); }
       if (action === "sent") { this.activity.sent(data.groupId, data.eventId); return json(res, { ok: true }); }
       if (action === "command") { return json(res, { text: await this.activity.command(String(data.groupId), String(data.userId), String(data.line)) }); }
       if (action === "abandon") {
@@ -138,6 +141,11 @@ export class Gateway {
       }
       const sessionKey = chatSessionKey(data.session_id);
       const context = chatRunContext(sessionKey, data.context);
+      const muteGeneration = Number.isSafeInteger(data.context?.muteGeneration) && data.context.muteGeneration >= 0 ? data.context.muteGeneration : 0;
+      if (context.route?.type === "group" && muteGeneration <= (this.mutedGenerations.get(context.route.groupId) ?? -1)) {
+        this.activity?.abandon(Number(data.context?.observationId), "禁言前的旧回复已取消");
+        return json(res, { error: "禁言前的旧回复已取消" }, 409);
+      }
       if (this.activity && context.route?.type === "user" && [...c.modules.chat.blockedUsers, ...c.activity.botUsers].includes(Number(context.route.userId))) { return json(res, { error: "此用户在 AI 忽略名单中" }, 403); }
       let input = data.input;
       let groupId: string;
@@ -151,9 +159,10 @@ export class Gateway {
         const preparation = new AbortController();
         let finish: () => void;
         const done = new Promise<void>(resolve => { finish = resolve; });
-        this.preparing.set(submissionKey, { controller: preparation, done });
+        this.preparing.set(submissionKey, { groupId, muteGeneration, controller: preparation, done });
         releasePreparation = () => { this.preparing.delete(submissionKey); finish(); };
         const submission = await this.activity.submission(groupId, Number(data.context?.observationId || 0), triggerId, AbortSignal.any([preparation.signal, this.shutdown.signal]));
+        preparation.signal.throwIfAborted();
         input = submission.input; context.submission = submission.submission;
         context.route.userId = submission.actorId;
         if (submission.source === "idle") {
@@ -172,7 +181,7 @@ export class Gateway {
         done: false,
         controller,
         approvalQueue: Promise.resolve(),
-        groupId, triggerId, submissionKey, batchId: context.submission?.batchId,
+        groupId, muteGeneration, triggerId, submissionKey, batchId: context.submission?.batchId,
       };
       this.runs.set(id, run);
       if (groupId) { this.activity.delivery(id, groupId, triggerId, context.submission?.batchId); }
@@ -326,8 +335,26 @@ export class Gateway {
     }
     return this.disconnecting;
   }
+  /** 禁言只取消目标 QQ 群的准备、执行和排队任务，保留原生会话历史。 */
+  async groupMuted(groupId: string, throughGeneration: number): Promise<void> {
+    if (!/^[1-9]\d*$/.test(groupId) || !Number.isSafeInteger(throughGeneration) || throughGeneration < 0) { throw new Error("禁言通知群号或回复代次无效"); }
+    if (throughGeneration <= (this.mutedGenerations.get(groupId) ?? -1)) { return; }
+    this.mutedGenerations.set(groupId, throughGeneration);
+    const reason = new Error(`QQ 群 ${groupId} 中 Bot 已被禁言`);
+    const preparations = [...this.preparing.values()].filter(item => item.groupId === groupId && item.muteGeneration <= throughGeneration);
+    for (const item of preparations) { item.controller.abort(reason); }
+    const runs = [...this.runs.entries()].filter(([, run]) => run.groupId === groupId && run.muteGeneration <= throughGeneration && !run.delivered);
+    for (const [, run] of runs) { run.controller.abort(reason); }
+    await Promise.allSettled(preparations.map(item => item.done));
+    await Promise.all(runs.map(async ([id, run]) => {
+      await run.task;
+      await run.execution;
+      await this.finishDelivery(id, true);
+    }));
+  }
   private async disconnectBot() {
     this.botEpoch = randomUUID();
+    this.mutedGenerations.clear();
     const preparations = [...this.preparing.values()];
     for (const preparation of preparations) { preparation.controller.abort(new Error("Bot 连接已断开")); }
     await Promise.allSettled(preparations.map(preparation => preparation.done));

@@ -15,6 +15,7 @@ import { learningTools } from "./native-tools.js";
 import { learningDelegations } from "./learning.js";
 import { chatTools } from "./chat-tools.js";
 import { speechTools } from "./speech.js";
+import type { GroupSendCheck } from "./onebot-tools.js";
 export class Agent {
   private queue = new SessionQueue();
   harness: Harness;
@@ -25,6 +26,7 @@ export class Agent {
   mcp: import("./mcp.js").McpManager;
   private loader: HostAPI;
   private sendVoice?: VoiceSender;
+  private checkGroupSend?: GroupSendCheck;
 
   constructor({
     loader,
@@ -34,6 +36,7 @@ export class Agent {
     skills,
     mcp,
     sendVoice,
+    checkGroupSend,
   }: {
     loader: HostAPI;
     config: ConfigSource;
@@ -42,8 +45,9 @@ export class Agent {
     skills: import("./files.js").SkillStore;
     mcp: import("./mcp.js").McpManager;
     sendVoice?: VoiceSender;
+    checkGroupSend?: GroupSendCheck;
   }) {
-    Object.assign(this, { loader, config, paths, memory, skills, mcp, sendVoice });
+    Object.assign(this, { loader, config, paths, memory, skills, mcp, sendVoice, checkGroupSend });
     this.harness = new Harness(loader, config, paths, mcp);
   }
   async context(input, channel) {
@@ -96,7 +100,7 @@ export class Agent {
         const tools = [
           ...learningTools(this.config, this.memory, this.skills, channel).filter(tool => !tool.name.endsWith("_save")),
           ...learningDelegations(this.loader, this.config, this.memory, this.skills, channel),
-          ...(channel === "chat" ? chatTools(this.config, this.paths, context.route) : []),
+          ...(channel === "chat" ? chatTools(this.config, this.paths, context.route, this.checkGroupSend) : []),
           ...(channel === "chat" ? speechTools(this.config, context.route, this.sendVoice ? async (route, audio, signal) => {
             const receipt = await this.sendVoice(route, audio, signal);
             voiceSent = true;

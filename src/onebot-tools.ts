@@ -1,6 +1,9 @@
 import type { AvailableTool, ChatRoute, ConfigSource } from "./types.js";
 import { nativeTool, textArgument } from "./native-tools.js";
 
+/** 所有群发送使用 Bot 维护的同一份禁言缓存，取消仅结束当前调用的等待。 */
+export type GroupSendCheck = (groupId: string, signal: AbortSignal) => Promise<boolean>;
+
 function endpoint(base: string, input: string): URL {
   const pathname = input.split("?")[0];
   if (/[\s\\#\x00-\x1f\x7f]/.test(input) ||
@@ -18,9 +21,20 @@ function endpoint(base: string, input: string): URL {
   return target;
 }
 
-async function call(config: ConfigSource, path: string, params: Record<string, unknown>, signal: AbortSignal) {
+async function call(config: ConfigSource, path: string, params: Record<string, unknown>, signal: AbortSignal, checkGroupSend?: GroupSendCheck) {
   signal.throwIfAborted();
   const c = config().connection, url = endpoint(c.httpUrl, path);
+  const action = url.pathname.split("/").filter(Boolean).at(-1)?.replace(/_(?:async|rate_limited)$/, "");
+  const context = params.context as Record<string, unknown> | undefined;
+  const operation = params.operation as Record<string, unknown> | undefined;
+  const quickReply = action === ".handle_quick_operation" && context?.message_type === "group" && operation?.reply !== undefined;
+  const groupId = quickReply ? context.group_id : params.group_id ?? url.searchParams.get("group_id");
+  const messageType = params.message_type ?? url.searchParams.get("message_type");
+  if (checkGroupSend && (quickReply || action === "forward_group_single_msg" || action?.startsWith("send_group_") || ["send_msg", "send_forward_msg"].includes(action) && messageType !== "private" && groupId)) {
+    if (!/^[1-9]\d*$/.test(String(groupId))) { throw new Error("群消息发送缺少有效 group_id"); }
+    if (!await checkGroupSend(String(groupId), signal)) { throw new Error(`QQ 群 ${groupId} 中 Bot 已被禁言，本次消息未发送`); }
+    signal.throwIfAborted();
+  }
   const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
   let response: Response;
   try {
@@ -58,7 +72,7 @@ function receiptTool(...args: Parameters<typeof nativeTool>): AvailableTool {
 }
 
 /** 按当前会话选取 OneBot 历史接口，通用接口由模型结合可信发言者身份判断权限。 */
-export function onebotTools(config: ConfigSource, route?: ChatRoute): AvailableTool[] {
+export function onebotTools(config: ConfigSource, route?: ChatRoute, checkGroupSend?: GroupSendCheck): AvailableTool[] {
   if (!route) { return []; }
   const source = JSON.stringify({ senderId: route.userId, conversationType: route.type, groupId: route.groupId ?? null, senderIsAdmin: route.admin === true });
   const tools = [receiptTool(
@@ -72,7 +86,7 @@ export function onebotTools(config: ConfigSource, route?: ChatRoute): AvailableT
     async (args, signal) => {
       const path = textArgument(args, "path", 2048);
       if (!args.params || typeof args.params !== "object" || Array.isArray(args.params)) { throw new Error("params 必须是 JSON 参数对象"); }
-      return call(config, path, args.params as Record<string, unknown>, signal);
+      return call(config, path, args.params as Record<string, unknown>, signal, checkGroupSend);
     },
   )];
   const group = route.type !== "user";

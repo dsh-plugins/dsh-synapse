@@ -59,6 +59,7 @@ export async function createService(
       skills,
       mcp,
       sendVoice: (route, audio, signal) => bot.sendVoice(route, audio, signal),
+      checkGroupSend: (groupId, signal) => bot.canSendGroup(groupId, signal),
     });
   const state = new ChatState(path.join(paths.data, "chat-state.sqlite"));
   const images = new ChatImages(paths, state, config);

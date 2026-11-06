@@ -8,7 +8,7 @@ import type {
 } from "./types.js";
 import { nativeTool, textArgument } from "./native-tools.js";
 import { repositoryAllowed } from "./github.js";
-import { onebotTools } from "./onebot-tools.js";
+import { onebotTools, type GroupSendCheck } from "./onebot-tools.js";
 
 async function readJson<T>(file: string, fallback: T): Promise<T> {
   try {
@@ -26,6 +26,7 @@ export function chatTools(
   config: ConfigSource,
   paths: PluginPaths,
   route?: ChatRoute,
+  checkGroupSend?: GroupSendCheck,
 ): AvailableTool[] {
   const text = { type: "string", minLength: 1 };
   const botConfig = path.join(paths.data, "bot", "configs");
@@ -64,7 +65,7 @@ export function chatTools(
     init?: RequestInit,
   ) => (await request(url, signal, init)).json();
   const tools = [
-    ...onebotTools(config, route),
+    ...onebotTools(config, route, checkGroupSend),
     nativeTool(
       "synapse_github_issue",
       "查询 GitHub Issue 或 PR 的标题、正文和状态。reference 支持 owner/repo#编号、GitHub 链接，或省略仓库的 #编号（默认 Anvil-Dev/AnvilCraft）。仅查询允许列表或已绑定账号的公开仓库，群聊需启用 GitHub 功能。",

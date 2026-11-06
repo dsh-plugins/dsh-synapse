@@ -65,6 +65,12 @@ export class BotActivity {
     this.notifications.add(task);
     void task.finally(() => this.notifications.delete(task));
   }
+  muted(groupId: string, throughGeneration: number) {
+    if (process.connected) { process.send?.({ type: "group-muted", groupId, throughGeneration }, error => { if (error) { this.bot?.logger?.warn(`[Synapse] 群 ${groupId} 禁言 IPC 通知失败`); } }); }
+    const task = this.request("muted", { groupId, throughGeneration }, 10000).catch(() => { this.bot?.logger?.warn(`[Synapse] 群 ${groupId} 禁言已通过 IPC 通知，HTTP 确认失败`); });
+    this.notifications.add(task);
+    void task.finally(() => this.notifications.delete(task));
+  }
   async finished(runId: string, failed: boolean) {
     await Promise.allSettled(this.notifications);
     if (process.connected) { process.send?.({ type: "activity-finished", runId, failed }); }

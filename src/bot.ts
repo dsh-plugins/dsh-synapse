@@ -8,6 +8,7 @@ import { atomicWrite } from "./files.js";
 import { featureFiles } from "./feature-config.js";
 import { randomUUID } from "node:crypto";
 import type { IdleActivation } from "./chat-activity.js";
+import { abortable } from "./abort.js";
 export class Bot {
   paths: PluginPaths;
   config: ConfigSource;
@@ -20,6 +21,7 @@ export class Bot {
   private activations = new Map<string, { resolve(): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
   private restarting?: Promise<void>;
   private voices = new Map<string, { resolve(receipt: VoiceReceipt): void; reject(error: Error): void }>();
+  private groupChecks = new Map<string, { resolve(allowed: boolean): void; reject(error: Error): void }>();
 
   constructor(
     paths: PluginPaths,
@@ -115,7 +117,14 @@ export class Bot {
     this.child.stderr?.on("data", (chunk) => {
       this.stderr = (this.stderr + chunk.toString()).slice(-6000);
     });
-    this.child.on("message", (msg: { type?: string; id?: string; error?: string; runId?: string; failed?: boolean; groupId?: string; eventId?: string; receipt?: VoiceReceipt }) => {
+    const worker = this.child;
+    this.child.on("message", (msg: { type?: string; id?: string; error?: string; runId?: string; failed?: boolean; groupId?: string; eventId?: string; receipt?: VoiceReceipt; allowed?: boolean; throughGeneration?: number }) => {
+      if (this.child !== worker) { return; }
+      if (msg?.type === "group-send-result") {
+        const pending = this.groupChecks.get(msg.id);
+        if (msg.error || typeof msg.allowed !== "boolean") { pending?.reject(new Error(msg.error || "禁言检查没有返回状态")); }
+        else { pending?.resolve(msg.allowed); }
+      }
       if (msg?.type === "voice-result") {
         const pending = this.voices.get(msg.id);
         if (pending) {
@@ -129,6 +138,7 @@ export class Bot {
         if (pending) { clearTimeout(pending.timer); this.activations.delete(msg.id); if (msg.error) { pending.reject(new Error(msg.error)); } else { pending.resolve(); } }
       }
       if (msg?.type === "activity-finished") { void this.gateway.finishDelivery(msg.runId, msg.failed).catch(this.onError); }
+      if (msg?.type === "group-muted") { void this.gateway.groupMuted(msg.groupId, msg.throughGeneration).catch(this.onError); }
       if (msg?.type === "activity-sent") {
         try { this.gateway.activity?.sent(msg.groupId, msg.eventId); }
         catch (cause) { this.onError(cause); }
@@ -145,6 +155,7 @@ export class Bot {
       for (const pending of this.activations.values()) { clearTimeout(pending.timer); pending.reject(new Error("Bot 进程已退出")); }
       this.activations.clear();
       for (const pending of this.voices.values()) { pending.reject(new Error("Bot 进程已退出，语音发送未确认")); }
+      for (const pending of this.groupChecks.values()) { pending.reject(new Error("Bot 进程已退出，禁言检查未确认")); }
       if (!this.stopping) { void this.gateway.botDisconnected().catch(this.onError); }
     });
     // Parent disconnect guarantees the upstream child cannot outlive its owner.
@@ -202,9 +213,24 @@ export class Bot {
       this.voices.delete(id);
     }
   };
+  /** 原生 OneBot 工具与普通发送共享子进程中的禁言缓存。 */
+  async canSendGroup(groupId: string, signal: AbortSignal): Promise<boolean> {
+    signal.throwIfAborted();
+    const child = this.child;
+    if (!child?.connected || this.state !== "running") { throw new Error("Bot 尚未就绪，无法检查禁言状态"); }
+    const id = randomUUID();
+    try {
+      const task = new Promise<boolean>((resolve, reject) => {
+        this.groupChecks.set(id, { resolve, reject });
+        child.send({ type: "group-send-check", id, groupId }, error => { if (error) { reject(new Error("禁言检查 IPC 请求失败")); } });
+      });
+      return await abortable(task, AbortSignal.any([signal, AbortSignal.timeout(15000)]));
+    } finally { this.groupChecks.delete(id); }
+  }
   async stop() {
     this.stopping = true;
     for (const pending of this.voices.values()) { pending.reject(new Error("Bot 已停止，语音发送未确认")); }
+    for (const pending of this.groupChecks.values()) { pending.reject(new Error("Bot 已停止，禁言检查未确认")); }
     const child = this.child;
     this.child = null;
     if (child && child.exitCode === null) {

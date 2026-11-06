@@ -13,7 +13,7 @@ const waitFor = async predicate => {
     await new Promise(resolve => setTimeout(resolve, 2));
   }
 };
-function fixture(t, request, identity = () => ({ user_id: 42, nickname: "bot" })) {
+function fixture(t, request, identity = () => ({ user_id: 42, nickname: "bot" }), canSendGroup, groupSignal) {
   const requests = [], sent = [], errors = [];
   const limits = { compactMaxChars: 300, compactMaxLines: 5, maxMessageLength: 1200, botName: "测试机器人" };
   const queue = new QQSendQueue({
@@ -23,12 +23,77 @@ function fixture(t, request, identity = () => ({ user_id: 42, nickname: "bot" })
     },
     limits: () => limits,
     identity,
+    canSendGroup,
+    groupSignal,
     sent: event => sent.push(event),
     onError: error => errors.push(error),
   }, 10);
   t.after(() => queue.close());
   return { queue, requests, sent, errors, limits };
 }
+
+test("禁言查询期间私聊继续发送，命中禁言丢弃整群批次且不占用发送间隔", async t => {
+  let release, allowed;
+  const check = new Promise(resolve => { release = resolve; });
+  const f = fixture(t, undefined, undefined, id => id === "123" ? allowed ?? check : true);
+  const first = f.queue.send("group", 123, text("待发一"));
+  const second = f.queue.send("group", 123, text("待发二"));
+  await f.queue.send("private", 123, text("同号私聊"));
+  allowed = false; release(false);
+  assert.deepEqual(await Promise.all([first, second]), [undefined, undefined]);
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].action, "send_private_msg");
+  allowed = true;
+  assert.equal(await f.queue.send("group", 123, text("解禁后的新消息")), 2);
+  assert.equal(plain(f.requests[1].payload.message), "解禁后的新消息");
+});
+
+test("禁言取消正在发送及等待的消息，旧回执不发送通知也不删除解禁后的新队列", async t => {
+  let finishOld, oldSignal;
+  const held = new Promise(resolve => { finishOld = resolve; });
+  const f = fixture(t, async (_action, payload, signal) => {
+    if (plain(payload.message) === "旧回复") { oldSignal = signal; await held; }
+    return 77;
+  });
+  const old = f.queue.send("group", 123, text("旧回复"));
+  await waitFor(() => oldSignal);
+  const queued = f.queue.send("group", 123, text("旧积压"));
+  f.queue.discardGroup("123");
+  assert.deepEqual(await Promise.all([old, queued]), [undefined, undefined]);
+  assert.equal(oldSignal.aborted, true);
+  const fresh = f.queue.send("group", 123, text("新回复"));
+  finishOld();
+  assert.equal(await fresh, 77);
+  assert.deepEqual(f.sent.map(item => plain(item.message)), ["新回复"]);
+  assert.equal(f.requests.length, 2);
+});
+
+test("查询失败结束当前群等待，下一条重查且其他群继续发送", async t => {
+  let fail = true;
+  const f = fixture(t, undefined, undefined, id => id === "123" && fail ? Promise.reject(new Error("断线")) : true);
+  const blocked = f.queue.send("group", 123, text("检查失败"));
+  assert.equal(await blocked, undefined);
+  fail = false;
+  await Promise.all([f.queue.send("group", 123, text("重查")), f.queue.send("group", 456, text("其他群"))]);
+  assert.equal(f.errors.length, 1);
+  assert.equal(f.requests.length, 2);
+});
+
+test("延迟确认禁言只丢弃旧代，等待同次查询的解禁后新消息仍可发送", async t => {
+  let release, entered = false, allowed;
+  const held = new Promise(resolve => { release = resolve; });
+  const old = new AbortController(); let current = old;
+  const f = fixture(t, undefined, undefined, () => { entered = true; return allowed ?? held; }, () => current.signal);
+  const first = f.queue.send("group", 123, text("禁言前的旧消息"));
+  await waitFor(() => entered);
+  current = new AbortController();
+  const fresh = f.queue.send("group", 123, text("解禁后的新消息"));
+  old.abort(); f.queue.discardAbortedGroup("123");
+  assert.equal(await first, undefined);
+  allowed = true; release(true);
+  assert.equal(await fresh, 1);
+  assert.equal(plain(f.requests[0].payload.message), "解禁后的新消息");
+});
 
 test("同一会话待发文字合并，群聊和同号私聊相互独立且共享间隔", async t => {
   const f = fixture(t);
@@ -65,6 +130,17 @@ test("语音排队期间取消不会发送，执行中取消会中止 OneBot 请
   await ready; running.abort();
   assert.equal(await pending, undefined);
   assert.equal(active.sent.length, 0);
+});
+
+test("同代回复的取消信号允许合并，不同信号的消息独立取消", async t => {
+  const f = fixture(t), group = new AbortController(), other = new AbortController();
+  const first = f.queue.send("group", 123, text("第一句"), { signal: group.signal });
+  const second = f.queue.send("group", 123, text("第二句"), { signal: group.signal });
+  const cancelled = f.queue.send("group", 123, text("独立取消"), { signal: other.signal });
+  other.abort();
+  assert.deepEqual(await Promise.all([first, second, cancelled]), [1, 1, undefined]);
+  assert.equal(f.requests.length, 1);
+  assert.equal(plain(f.requests[0].payload.message), "第一句\n第二句");
 });
 
 for (const operation of [false, true]) {

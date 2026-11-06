@@ -95,7 +95,9 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
           req.url === "/get_login_info"
             ? { user_id: 42, nickname: "testbot" }
             : req.url === "/get_group_info"
-              ? { group_name: "铁砧工艺交流反馈☕" }
+              ? { group_name: "铁砧工艺交流反馈☕", group_all_shut: 0 }
+              : req.url === "/get_group_member_info"
+                ? { role: "member", shut_up_timestamp: 0 }
               : { message_id: 77 },
       }),
     );

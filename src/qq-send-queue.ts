@@ -10,11 +10,13 @@ interface SendTask {
 }
 interface OperationTask { work: () => void | Promise<void> }
 type Task = SendTask | OperationTask;
-interface Outbox { type: "group" | "private" | "operation"; id: string | number; tasks: Task[]; busy: boolean; ready: boolean; preparing: boolean }
+interface Outbox { type: "group" | "private" | "operation"; id: string | number; tasks: Task[]; busy: boolean; ready: boolean; preparing: boolean; controller: AbortController; active?: Task }
 interface QueueOptions {
   request(action: string, payload: Record<string, unknown>, signal: AbortSignal): Promise<number | undefined>;
   limits(): { compactMaxChars: number; compactMaxLines: number; maxMessageLength: number; botName: string };
   identity(): { user_id: string | number; nickname?: string } | Promise<{ user_id: string | number; nickname?: string }>;
+  canSendGroup?(groupId: string): boolean | Promise<boolean>;
+  groupSignal?(groupId: string): AbortSignal;
   sent(event: { groupId: number; message: QQSegment[]; messageId: number; fromBridge: boolean; fromWebhook: boolean }): void;
   onError(error: unknown): void;
 }
@@ -38,18 +40,23 @@ export class QQSendQueue {
   constructor(private options: QueueOptions, private intervalMs = 2000) {}
 
   send(type: "group" | "private", id: string | number, message: QQSegment[], options: QQSendOptions = {}): Promise<number | undefined> {
+    if (!this.closed && type === "group" && this.options.groupSignal) {
+      const groupSignal = this.options.groupSignal(String(id));
+      options = { ...options, signal: options.signal && options.signal !== groupSignal ? AbortSignal.any([options.signal, groupSignal]) : groupSignal };
+    }
     if (this.closed || !message.length || options.signal?.aborted) {
       return Promise.resolve(undefined);
     }
     const key = `${type}:${id}`;
     const outbox = this.get(key, type, id);
     const parts = [structuredClone(message)];
-    const mergeable = !options.signal && options.merge !== false && !options.fromBridge && message.every(segment => mergeableTypes.has(segment.type)
+    const mergeable = options.merge !== false && !options.fromBridge && message.every(segment => mergeableTypes.has(segment.type)
       && (segment.type !== "node" || typeof segment.data?.content === "string" || Array.isArray(segment.data?.content)));
     return new Promise(resolve => {
       const tail = outbox.tasks.at(-1);
       const currentQuote = quote(parts);
       if (tail && "parts" in tail && tail.mergeable && mergeable
+        && tail.options.signal === options.signal
         && Boolean(tail.options.fromBridge) === Boolean(options.fromBridge)
         && Boolean(tail.options.fromWebhook) === Boolean(options.fromWebhook)
         && (currentQuote === undefined || currentQuote === quote(tail.parts))) {
@@ -69,6 +76,30 @@ export class QQSendQueue {
     const outbox = this.get("operation", "operation", "operation");
     outbox.tasks.push({ work });
     this.enqueue("operation", outbox);
+  }
+
+  /** 禁言取消本群当前发送和待发批次，其他会话继续使用共享队列。 */
+  discardGroup(groupId: string): void {
+    const key = `group:${groupId}`, outbox = this.outboxes.get(key);
+    if (!outbox) { return; }
+    outbox.controller.abort(new Error(`QQ 群 ${groupId} 的待发消息已取消`));
+    for (const task of outbox.tasks.splice(0)) { this.settle(task); }
+    if (outbox.active) { this.settle(outbox.active); }
+    this.outboxes.delete(key);
+    this.ready = this.ready.filter(item => item !== key);
+    this.schedule();
+  }
+
+  /** 延迟确认全员禁言时，只移除被取消代次，保留解禁后加入的消息。 */
+  discardAbortedGroup(groupId: string): void {
+    const outbox = this.outboxes.get(`group:${groupId}`);
+    if (!outbox) { return; }
+    outbox.tasks = outbox.tasks.filter(task => {
+      if ("parts" in task && task.options.signal?.aborted) { this.settle(task); return false; }
+      return true;
+    });
+    if (outbox.active && "parts" in outbox.active && outbox.active.options.signal?.aborted) { this.settle(outbox.active); }
+    if (!outbox.tasks.length && !outbox.busy) { this.discardGroup(groupId); }
   }
 
   close(): void {
@@ -91,7 +122,7 @@ export class QQSendQueue {
   private get(key: string, type: Outbox["type"], id: string | number): Outbox {
     let outbox = this.outboxes.get(key);
     if (!outbox) {
-      outbox = { type, id, tasks: [], busy: false, ready: false, preparing: false };
+      outbox = { type, id, tasks: [], busy: false, ready: false, preparing: false, controller: new AbortController() };
       this.outboxes.set(key, outbox);
     }
     return outbox;
@@ -117,10 +148,31 @@ export class QQSendQueue {
       }
       const key = this.ready.shift();
       const outbox = this.outboxes.get(key);
+      if (!outbox) { this.schedule(); return; }
       outbox.ready = false;
       const task = outbox.tasks[0];
       let prepared: PreparedMessage;
       try {
+        if (outbox.type === "group" && this.options.canSendGroup) {
+          const allowed = this.options.canSendGroup(String(outbox.id));
+          if (typeof allowed !== "boolean") {
+            outbox.preparing = true;
+            void allowed.then(canSend => {
+              if (this.closed || this.outboxes.get(key) !== outbox) { return; }
+              outbox.preparing = false;
+              if (canSend) { this.enqueue(key, outbox); }
+              else { this.discardGroup(String(outbox.id)); }
+            }, error => {
+              if (this.closed || this.outboxes.get(key) !== outbox) { return; }
+              this.discardGroup(String(outbox.id));
+              this.options.onError(new Error(`QQ 群 ${outbox.id} 禁言检查失败`, { cause: error }));
+            });
+            this.schedule();
+            return;
+          }
+          if (!allowed || this.outboxes.get(key) !== outbox) { this.discardGroup(String(outbox.id)); this.schedule(); return; }
+        }
+        if (outbox.tasks[0] !== task) { this.enqueue(key, outbox); return; }
         if ("parts" in task) {
           prepared = this.prepare(task);
         }
@@ -142,15 +194,17 @@ export class QQSendQueue {
           return identity;
         });
         void this.identityTask.then(() => {
+          if (this.outboxes.get(key) !== outbox) { return; }
           outbox.preparing = false;
           if (!this.closed) {
             this.enqueue(key, outbox);
           }
         }, error => {
           this.identityTask = undefined;
+          if (this.outboxes.get(key) !== outbox) { return; }
           outbox.preparing = false;
-          outbox.tasks.shift();
-          this.settle(task);
+          const index = outbox.tasks.indexOf(task);
+          if (index >= 0) { outbox.tasks.splice(index, 1); this.settle(task); }
           this.finish(key, outbox);
           if (!this.closed) {
             this.options.onError(error);
@@ -161,6 +215,7 @@ export class QQSendQueue {
       }
       outbox.tasks.shift();
       outbox.busy = true;
+      outbox.active = task;
       this.active.add(task);
       void this.execute(outbox, task, prepared).finally(() => {
         this.active.delete(task);
@@ -172,7 +227,9 @@ export class QQSendQueue {
   }
 
   private finish(key: string, outbox: Outbox): void {
+    if (this.outboxes.get(key) !== outbox) { return; }
     outbox.busy = false;
+    outbox.active = undefined;
     if (!this.closed) {
       if (outbox.tasks.length) {
         this.enqueue(key, outbox);
@@ -242,9 +299,10 @@ export class QQSendQueue {
         }
         payload = { [`${outbox.type === "group" ? "group" : "user"}_id`]: outbox.id, messages: nodes };
       }
-      const signal = task.options.signal ? AbortSignal.any([this.shutdown.signal, task.options.signal]) : this.shutdown.signal;
+      const signal = AbortSignal.any([this.shutdown.signal, outbox.controller.signal, ...(task.options.signal ? [task.options.signal] : [])]);
       signal.throwIfAborted();
       id = await this.options.request(`send_${outbox.type}_${forward ? "forward_msg" : "msg"}`, payload, signal);
+      signal.throwIfAborted();
       if (id === undefined) {
         throw new Error(`QQ ${outbox.type}:${outbox.id} 发送失败，OneBot 未返回消息 ID`);
       }

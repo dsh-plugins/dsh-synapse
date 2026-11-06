@@ -89,6 +89,34 @@ test("接口路径与参数验证阻止替换 base_url，非法历史参数不�
   assert.equal(f.requests.length, 0);
 });
 
+test("通用工具的群发送检查共享 Bot 缓存，私聊与查询继续执行", async t => {
+  const f = await fixture(t), checked = [];
+  let allowed = false;
+  const tools = chatTools(() => f.c, f.paths, f.route, async (id, signal) => { signal.throwIfAborted(); checked.push(id); return allowed; });
+  for (const path of ["/send_group_msg", "send_group_forward_msg_async", "send_msg", "send_group_ai_record"]) {
+    await assert.rejects(call(tools, "synapse_onebot_api", { path, params: { group_id: 456, message: "测试" } }), /禁言/);
+  }
+  await assert.rejects(call(tools, "synapse_onebot_api", { path: "send_group_msg?group_id=123", params: {} }), /禁言/);
+  assert.deepEqual(checked, ["456", "456", "456", "456", "123"]);
+  assert.equal(f.requests.length, 0);
+  for (const path of ["forward_group_single_msg", "forward_group_single_msg_async", "forward_group_single_msg_rate_limited"]) {
+    await assert.rejects(call(tools, "synapse_onebot_api", { path, params: { group_id: 456, message_id: 77 } }), /禁言/);
+  }
+  await call(tools, "synapse_onebot_api", { path: "forward_friend_single_msg", params: { user_id: 7, message_id: 77 } });
+  await call(tools, "synapse_onebot_api", { path: "send_msg", params: { message_type: "private", user_id: 7, message: "私聊" } });
+  await call(tools, "synapse_get_group_msg_history", {});
+  assert.equal(checked.length, 8);
+  for (const path of [".handle_quick_operation", ".handle_quick_operation_async", ".handle_quick_operation_rate_limited"]) {
+    await assert.rejects(call(tools, "synapse_onebot_api", { path, params: { context: { message_type: "group", group_id: 456 }, operation: { reply: "快速回复" } } }), /禁言/);
+  }
+  await call(tools, "synapse_onebot_api", { path: ".handle_quick_operation", params: { context: { message_type: "private", user_id: 7 }, operation: { reply: "私聊" } } });
+  await call(tools, "synapse_onebot_api", { path: ".handle_quick_operation", params: { context: { message_type: "group", group_id: 456 }, operation: { delete: true } } });
+  assert.equal(checked.length, 11);
+  allowed = true;
+  await call(tools, "synapse_onebot_api", { path: "send_group_msg", params: { group_id: 456, message: "解禁" } });
+  assert.equal(f.requests.length, 6);
+});
+
 test("业务失败、异步接收与 HTTP 错误保留真实回执，非 JSON 和过大回执明确报错", async t => {
   const replies = [
     [200, { status: "failed", retcode: 100, message: "权限不足", data: null }],
