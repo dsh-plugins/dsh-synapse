@@ -77,7 +77,7 @@ test("标准预设无法挂载时返回明确错误", async t => {
   await assert.rejects(f.run(), /standard 预设尚未启用/);
 });
 
-test("仅支持创建时记录预设的宿主迁移旧绑定，保留旧记录并恢复新预设", async t => {
+test("旧宿主恢复聊天会话时沿用原 ID，并挂载标准预设能力", async t => {
   const f = await fixture(t);
   const get = f.host.loader.services.get, standard = get("agentPresets");
   f.host.loader.services.get = name => name === "agentPresets" ? { mount: standard.mount } : get(name);
@@ -86,11 +86,12 @@ test("仅支持创建时记录预设的宿主迁移旧绑定，保留旧记录�
   old.agent.inject({ role: "user", content: "旧会话历史" });
   await old.dispose();
   assert.equal(await f.run(), "done");
-  const current = f.host.created.at(-1).agent;
-  assert.notEqual(current.id, binding.id);
-  assert.equal(current.session.header.agentPreset, "standard");
-  assert(f.host.stored.get(binding.id).some(message => message.content === "旧会话历史"));
+  const current = f.host.resumed.at(-1);
+  assert.equal(f.host.created.length, 1);
+  assert.equal(current.agent.id, binding.id);
+  assert(current.tools.some(tool => tool.name === "standard_read"));
+  assert(current.conversation.some(message => message.content === "旧会话历史"));
   await f.reload();
   assert.equal(await f.run(), "done");
-  assert.equal(f.host.resumed.at(-1).agent.id, current.id);
+  assert.equal(f.host.resumed.at(-1).agent.id, binding.id);
 });

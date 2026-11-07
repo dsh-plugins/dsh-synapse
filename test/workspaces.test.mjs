@@ -34,7 +34,7 @@ test("聊天与审查使用各自 profile 工作区，恢复的旧会话切换�
   assert.equal(host.permissionWrites.filter(write => write.sessionId === binding.id).length, 1);
 });
 
-test("缺少目录切换能力的旧宿主新建正确工作区的会话，并保留旧记录", async (t) => {
+test("缺少目录切换能力的旧宿主仍用原目录恢复聊天会话", async (t) => {
   const profile = await mkdtemp(path.join(os.tmpdir(), "synapse-workspaces-"));
   const paths = { profile, data: path.join(profile, "data") };
   const host = hostFixture();
@@ -46,9 +46,9 @@ test("缺少目录切换能力的旧宿主新建正确工作区的会话，并�
   const config = defaultsFor(template.fields), harness = new Harness(host.loader, () => config, paths, {});
   t.after(async () => { await harness.close(); await rm(profile, { recursive: true, force: true }); });
   await harness.run("规则", "消息", [], [], undefined, undefined, undefined, "chat:example");
-  assert.notEqual(host.created.at(-1).agent.id, binding.id);
-  assert.equal(host.created.at(-1).agent.session.header.cwd, path.join(profile, "workspace/chat"));
-  assert(host.stored.has(binding.id));
+  assert.equal(host.created.length, 1);
+  assert.equal(host.resumed[0].agent.id, binding.id);
+  assert.equal(host.resumed[0].agent.session.header.cwd, paths.data);
 });
 
 test("工作区注册表按原始目录验证成员，聊天与审查均登记为可见会话", async (t) => {
@@ -59,17 +59,25 @@ test("工作区注册表按原始目录验证成员，聊天与审查均登记�
   const binding = await new SessionBindings(paths.data).get("chat:example");
   const old = await agents.create({ sessionId: binding.id, meta: { cwd: paths.data } });
   old.agent.inject({ role: "user", content: "原始会话历史" });
+  const originalWorkspace = await host.workspaceRegistry.create(paths.data);
+  await originalWorkspace.attachSession(binding.id);
   await old.dispose();
   const config = defaultsFor(template.fields), harness = new Harness(host.loader, () => config, paths, {});
   t.after(async () => { await harness.close(); await rm(profile, { recursive: true, force: true }); });
+  await harness.run("规则", "消息", [], [], undefined, undefined, undefined, "chat:example");
+  const restored = host.resumed[0];
+  assert.equal(restored.agent.id, binding.id);
+  assert.equal(restored.agent.session.header.cwd, paths.data);
+  assert.equal(host.loader.services.get("workingDirectory").get(restored.agent.session), path.join(profile, "workspace", "chat"));
+  assert(originalWorkspace.sessionIds.includes(binding.id));
+  assert(restored.conversation.some(message => message.content === "原始会话历史"));
   for (const channel of ["chat", "review"]) {
-    await harness.run("规则", "消息", [], [], undefined, undefined, undefined, `${channel}:example`, channel);
+    await harness.run("规则", "消息", [], [], undefined, undefined, undefined, `${channel}:new`, channel);
     const session = host.created.at(-1).agent.session;
     const workspace = host.workspaceRegistry.list().find(entry => entry.path === path.join(profile, "workspace", channel));
     assert(workspace.sessionIds.includes(session.id));
     assert.notEqual(session.id, binding.id);
   }
-  assert(host.stored.get(binding.id).some(message => message.content === "原始会话历史"));
 });
 
 test("工作区登记失败时释放已创建的会话句柄，修复后可以恢复", async (t) => {

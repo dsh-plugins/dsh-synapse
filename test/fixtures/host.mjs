@@ -11,6 +11,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
     headers = new Map(),
     permissionWrites = [],
     records = new Map(),
+    liveAgents = new Map(),
     failures = new Map(),
     activeChildren = new Map(),
     globalListeners = new Map();
@@ -61,6 +62,9 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
   };
   async function create(options) {
     const id = options.sessionId ?? options.resumeSessionId;
+    if (liveAgents.has(id)) {
+      throw Object.assign(new Error(`会话 ${id} 已有活动代理`), { name: "SessionAlreadyOwnedError" });
+    }
     const conversation = stored.get(id) ?? [];
     stored.set(id, conversation);
     const events = logs.get(id) ?? [];
@@ -196,9 +200,20 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
       whenIdle: () => task,
     };
     await options.setup?.(scope, agent);
+    const handle = {
+      agent,
+      dispose: async () => {
+        if (liveAgents.get(id) !== agent) { return; }
+        disposed.push(agent.id);
+        controller.abort();
+        await task;
+        liveAgents.delete(id);
+      },
+    };
     const record = {
       options,
       agent,
+      handle,
       tools,
       restrictions,
       injected,
@@ -209,19 +224,13 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
       listeners,
     };
     records.set(id, record);
+    liveAgents.set(id, agent);
     broadcast("agent/created", { agent });
     if (options.resumeSessionId) resumed.push(record);
     else created.push(record);
-    return {
-      agent,
-      dispose: async () => {
-        disposed.push(agent.id);
-        controller.abort();
-        await task;
-      },
-    };
+    return handle;
   }
-  const agents = { create, resume: create, ctx: globalContext };
+  const agents = { create, resume: create, get: id => liveAgents.get(id), ctx: globalContext };
   async function startActivation(spec) {
     spec.signal.throwIfAborted();
     const parent = spec.request.parent;

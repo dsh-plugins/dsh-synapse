@@ -11,7 +11,7 @@ import type {
   NativeSubmission,
 } from "./types.js";
 import type { McpManager } from "./mcp.js";
-import { SessionBindings } from "./session-bindings.js";
+import { SessionBindings, type SessionBinding } from "./session-bindings.js";
 import { safePath, type InstructionFile } from "./files.js";
 
 export type ApprovalAnswer = "allowed-once" | "rejected" | "cancelled";
@@ -37,6 +37,11 @@ interface Resident {
   scope: any;
   turn?: Turn;
   seeded: boolean;
+}
+
+function isUnrestorableHistory(error, id?: string): boolean {
+  return ["SessionPersistenceNotFoundError", "SessionPersistenceCorruptionError"].includes(error.name)
+    && (id === undefined || error.sessionId === undefined || error.sessionId === id);
 }
 
 /** DSH owns model routing, the tool loop, policies, cancellation and session logs. */
@@ -161,14 +166,21 @@ export class Harness {
     }
     signal.throwIfAborted();
     const cached = sessionKey && this.residents.get(sessionKey);
-    if (cached && this.isArchived(cached.handle.agent.id)) {
-      await cached.handle.dispose();
-      this.residents.delete(sessionKey);
+    if (cached) {
+      const agent = cached.handle.agent;
+      const agents = this.loader.services.get("agents");
+      if (
+        this.isArchived(agent.id) ||
+        (channel === "chat" && agents?.get && agents.get(agent.id) !== agent)
+      ) {
+        this.residents.delete(sessionKey);
+        await cached.handle.dispose();
+      }
     }
     const resident = sessionKey
       ? (this.residents.get(sessionKey) ??
         (await this.acquire(selection, signal, sessionKey, onEvent, channel)))
-      : await this.create(selection, signal, undefined, channel);
+      : await this.create(selection, signal, channel);
     if (sessionKey) this.residents.set(sessionKey, resident);
     if (resident.turn) throw new Error("同一会话必须通过消息队列串行执行");
     const { handle, scope } = resident;
@@ -342,28 +354,55 @@ export class Harness {
     return this.loader.services.get("workspaceRegistry")?.archivedSessionIds.includes(id) ?? false;
   }
 
-  private async acquire(selection, signal: AbortSignal, key: string, onEvent: AgentEvent, channel: Channel) {
+  private async historyUnavailable(id: string, signal: AbortSignal): Promise<boolean> {
+    const persistence = this.loader.services.get("sessionPersistence");
+    if (!persistence?.open) { return false; }
+    let reader;
     try {
-      return await this.create(selection, signal, key, channel);
+      reader = await persistence.open(id, "read", { signal });
+      await reader.read(0, undefined, { signal });
+      return false;
     } catch (error) {
       signal.throwIfAborted();
-      const unavailable = [
-        "SessionAlreadyOwnedError", "SessionAlreadyExistsError",
-        "SessionPersistenceNotFoundError", "SessionPersistenceCorruptionError",
+      if (isUnrestorableHistory(error, id)) { return true; }
+      throw error;
+    } finally {
+      await reader?.close();
+    }
+  }
+
+  private async acquire(selection, signal: AbortSignal, key: string, onEvent: AgentEvent, channel: Channel) {
+    const binding = await this.bindings.get(key);
+    try {
+      return await this.create(selection, signal, channel, binding);
+    } catch (error) {
+      signal.throwIfAborted();
+      const archived = error.name === "SessionArchivedError" && this.isArchived(binding.id);
+      const writerHeld = error.name === "SessionAlreadyOwnedError";
+      // 初始化和扩展监听器也可能抛出同名错误。换绑前只读核对原生历史。
+      const missingOrCorrupt = isUnrestorableHistory(error, channel === "chat" ? binding.id : undefined)
+        && (channel === "review" || await this.historyUnavailable(binding.id, signal));
+      const reviewUnavailable = channel === "review" && (writerHeld || [
+        "SessionAlreadyExistsError",
         "SessionOwnershipLostError", "SessionFormatUnsupportedError",
-        "SessionWorkspaceChangedError", "SessionArchivedError", "SessionPresetChangedError",
-      ].includes(error.name) || ["ENOENT", "EACCES", "EPERM"].includes(error.code);
-      if (!unavailable) {
+        "SessionWorkspaceChangedError", "SessionPresetChangedError",
+      ].includes(error.name) || ["ENOENT", "EACCES", "EPERM"].includes(error.code));
+      if (
+        channel === "chat" && !archived && (writerHeld ||
+          (missingOrCorrupt && this.loader.services.get("agents")?.get?.(binding.id)))
+      ) {
+        throw new Error(`DSH 聊天会话正被其他写入句柄占用，释放后可继续原会话（${binding.id}）`, { cause: error });
+      }
+      if (!archived && !missingOrCorrupt && !reviewUnavailable) {
         throw error;
       }
-      const previous = await this.bindings.get(key);
-      await this.bindings.reset(key, signal);
-      // 只替换本通道绑定，不释放其他调用方持有的会话；新建失败直接返回错误。
-      const replacement = await this.create(selection, signal, key, channel);
+
+      const next = { id: `synapse-${randomUUID()}`, bootstrap: false };
+      const replacement = await this.create(selection, signal, channel, next, key);
       this.residents.set(key, replacement);
       onEvent("session.replaced", {
-        previousSession: previous.id,
-        session: replacement.handle.agent.id,
+        previousSession: binding.id,
+        session: next.id,
         reason: error.name,
       });
       return replacement;
@@ -373,33 +412,41 @@ export class Harness {
   private async create(
     selection,
     signal: AbortSignal,
-    key?: string,
-    channel: Channel = "chat",
+    channel: Channel,
+    binding?: SessionBinding,
+    replaceKey?: string,
   ): Promise<Resident> {
     const agents = this.loader.services.get("agents");
     if (!agents?.create) throw new Error("DSH Agent 服务不可用");
     const cwd = await safePath(this.paths.profile, "workspace", channel);
     await mkdir(cwd, { recursive: true });
-    const binding = key
-      ? await this.bindings.get(key)
-      : { id: randomUUID(), bootstrap: true };
-    const id = binding.id;
+    const id = binding?.id ?? randomUUID();
     const workspaces = this.loader.services.get("workspaceRegistry");
     if (this.isArchived(id)) {
       throw Object.assign(new Error("绑定的 DSH 会话已归档"), { name: "SessionArchivedError" });
     }
+    if (channel === "chat" && binding && agents.get?.(id)) {
+      throw Object.assign(new Error("绑定的 DSH 会话已有活动代理"), { name: "SessionAlreadyOwnedError" });
+    }
     const persistence = this.loader.services.get("sessionPersistence");
+    if (channel === "chat" && binding && !persistence?.stat) {
+      throw new Error("DSH 聊天会话持久化服务暂不可用");
+    }
+    const resident: Resident = {
+      handle: undefined,
+      scope: undefined,
+      seeded: binding?.bootstrap === false,
+    };
     const stored =
-      key && persistence?.stat
+      binding && persistence?.stat
         ? await persistence.stat(id, { signal })
         : undefined;
     const presets = this.loader.services.get("agentPresets");
-    if (stored && presets && !presets.presetForSession && stored.header.agentPreset !== "standard") {
+    if (channel === "review" && stored && presets && !presets.presetForSession && stored.header.agentPreset !== "standard") {
       throw Object.assign(new Error("历史会话需要切换到标准预设"), { name: "SessionPresetChangedError" });
     }
     const workingDirectory = this.loader.services.get("workingDirectory");
-    // 工作区成员必须匹配不可变的原始目录；只支持原始目录的宿主也需要新建绑定。
-    if (stored && stored.header.cwd !== cwd && (workspaces || !workingDirectory?.set)) {
+    if (channel === "review" && stored && stored.header.cwd !== cwd && (workspaces || !workingDirectory?.set)) {
       throw Object.assign(new Error("历史会话需要切换到通道工作区"), { name: "SessionWorkspaceChangedError" });
     }
     const preset = this.config().limits.sessionPermission;
@@ -414,13 +461,9 @@ export class Harness {
             : `DSH 权限预设不可用：${preset}`,
         );
     }
-    const resident: Resident = {
-      handle: undefined,
-      scope: undefined,
-      seeded: Boolean(stored) || !binding.bootstrap,
-    };
-    const setup = async (scope, agent) => {
+    const setup = async (scope, agent, resumed = false) => {
       resident.scope = scope;
+      resident.seeded ||= resumed;
       // 使用预设的宿主按会话挂载；全局提供标准能力的宿主直接继承插件树。
       if (presets) {
         await presets.mount(scope, "standard");
@@ -428,11 +471,11 @@ export class Harness {
           agent.session.append("agent-preset/selected", { agentPreset: "standard" });
         }
       }
-      if (stored && workingDirectory?.set) {
+      if (resumed && workingDirectory?.set) {
         await workingDirectory.set(agent, cwd, signal);
       }
       // Use the host writer before publication; resumed sessions keep their log.
-      if (!stored) permissions.set(agent.session, preset);
+      if (!resumed) { permissions.set(agent.session, preset); }
       const prompt = scope.get("systemPrompt"),
         tools = scope.get("tools");
       if (
@@ -503,22 +546,38 @@ export class Harness {
         { prepend: true },
       );
     };
-    resident.handle = stored
-      ? await agents.resume({
-          resumeSessionId: id,
-          agentOptions: selection,
-          signal,
-          setup,
-        })
-      : await agents.create({
+    const resume = () => agents.resume({
+      resumeSessionId: id,
+      agentOptions: selection,
+      signal,
+      setup: (scope, agent) => setup(scope, agent, true),
+    });
+    if (stored) {
+      resident.handle = await resume();
+    } else {
+      try {
+        resident.handle = await agents.create({
           sessionId: id,
           meta: { cwd, ...(presets ? { agentPreset: "standard" } : {}) },
           agentOptions: selection,
           signal,
           setup,
         });
+      } catch (error) {
+        if (channel !== "chat" || !binding || resident.scope || error.name !== "SessionAlreadyExistsError" ||
+            (error.sessionId !== undefined && error.sessionId !== id)) {
+          throw error;
+        }
+        // JSONL 的 stat 遇到无效头部时也可能返回空值。用原 ID 恢复以区分并发创建和日志损坏。
+        resident.handle = await resume();
+      }
+    }
     try {
-      if (workspaces) {
+      if (replaceKey) {
+        await this.bindings.replace(replaceKey, id, signal);
+      }
+      // 工作区注册表用原始目录验证归属，旧聊天会话可在原工作区继续使用。
+      if (workspaces && (channel === "review" || resident.handle.agent.session.header.cwd === cwd)) {
         const workspace = await workspaces.create(cwd);
         await workspace.attachSession(resident.handle.agent.id);
       }
@@ -526,7 +585,7 @@ export class Harness {
       try {
         await resident.handle.dispose();
       } catch (cleanup) {
-        throw new AggregateError([error, cleanup], "工作区登记失败，且会话清理失败");
+        throw new AggregateError([error, cleanup], "会话绑定或工作区登记失败，且句柄清理失败");
       }
       throw error;
     }
@@ -535,8 +594,8 @@ export class Harness {
   async reset(key: string) {
     const resident = this.residents.get(key);
     if (resident) {
-      await resident.handle.dispose();
       this.residents.delete(key);
+      await resident.handle.dispose();
     }
     await this.bindings.reset(key);
   }

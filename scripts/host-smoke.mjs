@@ -488,12 +488,17 @@ try {
   const occupied = await ctx.sessionPersistence.open(binding.id, "write");
   harness = makeHarness();
   try {
-    await residentRun("恢复聊天", "会话被占用后继续");
-    assert.notEqual(requests.at(-1).sessionId, binding.id);
+    const count = (await ctx.sessionPersistence.list()).length;
+    await assert.rejects(residentRun("恢复聊天", "会话被占用时的输入"), /会话正被其他写入句柄占用/);
+    assert.equal((await new SessionBindings(data).get("chat:group:123")).id, binding.id);
+    assert.equal((await ctx.sessionPersistence.list()).length, count);
     assert((await occupied.read()).events.length > 0);
   } finally {
     await occupied.close();
   }
+  await residentRun("恢复聊天", "会话释放后继续");
+  assert.equal(requests.at(-1).sessionId, binding.id);
+  assert.match(JSON.stringify(requests.at(-1).messages), /after explicit reset/);
   const delegated = [];
   const delegationLimit = config.limits.maxToolRounds;
   const offDelegated = ctx.on("subagent/start", (info) => {
@@ -567,6 +572,25 @@ try {
     const review = await new SessionBindings(data).get("review:foo/bar");
     const workspace = await ctx.workspaceRegistry.resolveByPath(path.join(data, "workspace", "review"));
     assert(workspace.sessionIds.includes(review.id));
+  }
+  {
+    const key = "chat:user:456";
+    const privateRun = (input) => harness.run("恢复私聊", input, [], [], undefined, undefined, undefined, key);
+    await privateRun("检查损坏日志恢复");
+    const bindings = new SessionBindings(data);
+    const old = await bindings.get(key);
+    await harness.close();
+    harness = makeHarness();
+    const artifact = (await ctx.sessionPersistence.stat(old.id))?.location;
+    if (artifact?.kind === "jsonl") {
+      assert(path.resolve(artifact.path).startsWith(path.join(data, "native-history") + path.sep));
+      await writeFile(artifact.path, "invalid session header\n");
+      await privateRun("原生确认历史损坏后继续");
+      const current = await bindings.get(key);
+      assert.notEqual(current.id, old.id);
+      assert.equal(requests.at(-1).sessionId, current.id);
+      assert.equal(await readFile(artifact.path, "utf8"), "invalid session header\n");
+    }
   }
   {
     await ctx.plugin(await load("dsh-tool-fs"), { read: false, write: false, edit: false, readImage: true });

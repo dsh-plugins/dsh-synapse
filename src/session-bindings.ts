@@ -42,7 +42,13 @@ export function chatRunContext(key: string, value: unknown): RunContext {
   };
 }
 
-/** Only the binding lives here; the native DSH persistence service owns session history. */
+/** 记录原生会话 ID，以及首次创建时能否补入旧通道上下文。 */
+export interface SessionBinding {
+  id: string;
+  bootstrap: boolean;
+}
+
+/** 会话 ID 保存在绑定文件中，历史由 DSH 原生服务持久化。 */
 export class SessionBindings {
   constructor(private data: string) {}
   private async file(key: string) {
@@ -52,7 +58,7 @@ export class SessionBindings {
       `${createHash("sha256").update(key).digest("hex")}.json`,
     );
   }
-  async get(key: string): Promise<{ id: string; bootstrap: boolean }> {
+  async get(key: string): Promise<SessionBinding> {
     const file = await this.file(key);
     try {
       const value = JSON.parse(await readFile(file, "utf8"));
@@ -72,12 +78,14 @@ export class SessionBindings {
     await atomicWrite(file, JSON.stringify({ key, id }));
     return { id, bootstrap: true };
   }
-  async reset(key: string, signal?: AbortSignal) {
-    const id = `synapse-${randomUUID()}`;
+  async replace(key: string, id: string, signal?: AbortSignal) {
     await atomicWrite(
       await this.file(key),
       JSON.stringify({ key, id, bootstrap: false }),
       signal,
     );
+  }
+  reset(key: string) {
+    return this.replace(key, `synapse-${randomUUID()}`);
   }
 }
