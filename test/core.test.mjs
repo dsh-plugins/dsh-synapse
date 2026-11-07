@@ -12,9 +12,9 @@ import { SkillStore, instructionFor, pathsFor } from "../lib/host/files.js";
 import { Memory, parseHermes } from "../lib/host/memory.js";
 import {
   verifySignature,
-  repositoryAllowed,
   Reviews,
 } from "../lib/host/github.js";
+import { newRepository, repositoryConnection } from "../lib/host/github-repositories.js";
 import { hostFixture } from "./fixtures/host.mjs";
 import { Agent } from "../lib/host/agent.js";
 import { Gateway } from "../lib/host/gateway.js";
@@ -47,7 +47,7 @@ test("defaults form valid config and reject invalid structured fields", () => {
   assert.equal(c.limits.sessionPermission, "read-only");
   assert.throws(() => validateConfig({ ...c, limits: { ...c.limits, sessionPermission: "invalid" } }));
   assert.throws(() => validateConfig({ ...c, mcpServers: [{ name: "x" }] }));
-  assert.throws(() => validateConfig({ ...c, github: { ...c.github, enabled: true } }));
+  assert.throws(() => validateConfig({ ...c, github: { ...c.github, repositories: [newRepository("foo/bar"), newRepository("FOO/BAR")] } }), /仓库连接不能重复/);
   assert.throws(() => validateConfig({ ...c, memory: { ...c.memory, recallCount: 1.5 } }));
 });
 test("profile prompt overrides home; chat and review use distinct files", async () => {
@@ -143,9 +143,9 @@ test("signature validation uses raw bytes and repository allowlists", () => {
   assert(verifySignature(raw, secret, signature));
   assert(!verifySignature(Buffer.from('{"a":1}'), secret, signature));
   assert(!verifySignature(raw, "", signature));
-  assert(repositoryAllowed("Owner/Repo", ["owner/*"]));
-  assert(!repositoryAllowed("owner-evil/repo", ["owner/*"]));
-  assert(!repositoryAllowed("../repo", ["owner/*"]));
+  assert(repositoryConnection("Owner/Repo", [newRepository("owner/*")]));
+  assert(!repositoryConnection("owner-evil/repo", [newRepository("owner/*")]));
+  assert(!repositoryConnection("../repo", [newRepository("../*")]));
 });
 test("cross-site and unavailable browser authentication are denied", () => {
   let status;
@@ -337,7 +337,8 @@ test("durable GitHub queue creates head-bound review, deduplicates publication a
   const base = config();
   const c = {
     ...base,
-    github: { ...base.github, enabled: true, publishReviews: true, allowedRepositories: ["owner/repo"] },
+    github: { ...base.github, enabled: true, publishReviews: true, token: "token", webhookSecret: "secret",
+      repositories: [{ ...newRepository("owner/repo"), reviewPr: true }] },
   };
   const bound = [];
   const r = new Reviews(

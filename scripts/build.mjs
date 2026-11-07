@@ -88,7 +88,7 @@ await build({
               }
               contents = contents.slice(0, start) + replacement + contents.slice(end);
             };
-            contents = `import { QQSendQueue } from ${JSON.stringify(path.resolve("src/qq-send-queue.ts"))};\nimport { getHermesConfig } from '@/features/hermes/config';\n${contents}`;
+            contents = `import { QQSendQueue } from ${JSON.stringify(path.resolve("src/qq-send-queue.ts"))};\nimport { getHermesConfig } from '@/features/hermes/config';\nimport { getGithubSubscribers } from '@/config/features';\n${contents}`;
             replace("  private operationQueue: (() => void)[] = [];", "  private readonly synapseSendQueue: QQSendQueue;");
             replace("  private lastOperationHandle = -1;\n", "");
             replace("    setInterval(() => this.handlerOperationQueue(this), 2000);", `    this.synapseSendQueue = new QQSendQueue({
@@ -127,11 +127,26 @@ await build({
               "github.start(botConfig.githubPort);",
               `
         process.on('message', (message: any) => {
-          if (message?.type === 'github') void github.post('github-' + message.event, bot, message.payload);
+          if (message?.type === 'github') {
+            if (getGithubSubscribers(message.payload.repository.full_name).length) {
+              void github.post('github-' + message.event, bot, message.payload).catch(error => bot.logger?.error(error));
+            }
+          }
         });
         process.on('disconnect', () => process.exit(0));
         process.send?.({ type: 'ready' });`,
             );
+          }
+          if (file === path.join(vendor, "src", "config", "features.ts")) {
+            const subscriberLookup = "  return getGithubConfig().groups[repository] || [];";
+            if (!contents.includes(subscriberLookup)) {
+              throw new Error("GitHub 仓库订阅查找适配锚点缺失");
+            }
+            contents = contents.replace(subscriberLookup, `  const key = repository.toLowerCase();
+  const subscribers = Object.entries(getGithubConfig().groups)
+    .filter(([name]) => name.toLowerCase() === key)
+    .flatMap(([, groups]) => groups);
+  return [...new Set(subscribers)];`);
           }
           if (file.endsWith(path.join("src", "custom.ts")))
             contents = contents.replace(

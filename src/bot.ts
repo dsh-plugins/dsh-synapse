@@ -56,7 +56,7 @@ export class Bot {
         httpToken: connection.httpToken,
         wsToken: connection.wsToken,
         chromePath: connection.chromePath,
-        githubAllowedRepositories: c.github.allowedRepositories,
+        githubAllowedRepositories: c.github.repositories.map(row => row.repository),
         logLevel: connection.logLevel,
       }),
     );

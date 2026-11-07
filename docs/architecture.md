@@ -22,7 +22,7 @@
 | `enabled`、`chatModel`、`reviewModel` | 机器人总开关与两个通道的模型 |
 | `connection` | OneBot HTTP / WebSocket 地址、两个访问令牌、Chrome 路径、User-Agent、令牌参数前缀与日志级别 |
 | `limits` | 新会话权限预设、单轮超时与单轮步骤上限 |
-| `github` | Webhook 审查开关、Secret、Token、允许的仓库列表、评论发布与差异长度上限 |
+| `github` | Webhook 开关、无密钥卡片开关、Secret、Token、仓库功能开关、评论发布与差异长度上限 |
 | `memory` | 长期记忆开关、检索条数、记忆库容量、嵌入与重排模型、记忆与 Skill 总结规则 |
 | `speech` | BreezeBlue 语音开关、服务地址、API Key、音色、模型、语言、风格、字符上限及合成超时 |
 | `modules` | 机器人功能：`chat`（对话行为）、`presentation`（进度、审批与表情回应）、`groupFeatures`（按群启用的五个功能）、`management`、`bili`、`github`、`welcome`、`discord`、`peakValley` |
@@ -30,7 +30,7 @@
 
 `feature-config.ts` 中的 `featureFiles` 把 `modules` 翻译为 gugle-chat-bot 读取的功能文件：`chat` 与 `presentation` 按上游字段顺序合并为 `hermes.json`，`groupFeatures` 拆回 `parentheses.json` 等五个文件，峰谷提醒写回 `peak_msg` 等上游键名。`modulesFromFiles` 执行反向翻译，用于「同步聊天命令修改的功能设置」。
 
-`config-migration.ts` 在注册配置前直接读取 `config.json`。检测到平铺布局的旧字段（如 `httpUrl`、`ragEnabled`、`modules.command`）时，逐项搬到上述分组，`repositories` 多行文本拆为 `github.allowedRepositories` 数组，原文件备份为 `<profile>/data/dsh-synapse/config-before-restructure.json`，再以原修订号为前提写入新结构。表单化之前的配置（含 `features`、`mcp`、`botJson` 等字符串字段）先完成同样的搬迁，再解析字符串并合并机器人当前功能文件中由聊天命令写入的设置，备份为 `config-before-forms.json`。已是分组结构的配置不会再次迁移。
+`config-migration.ts` 读取原始 `config.json`，使用原修订号写入迁移结果。平铺布局备份为 `<profile>/data/dsh-synapse/config-before-restructure.json`。表单化之前的配置会合并机器人功能文件里由聊天命令写入的设置，备份为 `config-before-forms.json`。旧 `github.allowedRepositories` 转为 `github.repositories`，迁移的连接默认只开启卡片，现有分组配置备份为 `config-before-github-repositories.json`。
 
 ## 原生会话绑定与恢复
 
@@ -80,4 +80,5 @@
 ## QQ 发送队列与 GitHub 审查队列
 
 - **QQ 发送调度（`QQSendQueue`）**：群聊、私聊与通用操作按各自队列管理，由全局调度器按至少 2 秒间隔轮流发送。某会话等待 OneBot 回执期间，其他会话可继续发送。同一会话待发送的兼容消息会先合并，合并后若超过字符阈值（默认 300）、行数阈值（默认 5）或单条最大长度（默认 1200），自动打包为合并转发聊天记录。含不同引用、桥接来源、Webhook 通知、语音或需单独撤回的私聊回执则保持独立发送。
-- **GitHub Webhook 队列（`Reviews`）**：Webhook 投递记录保存在 SQLite `deliveries` 表，按 `X-Hub-Signature-256` 验签并按 `X-GitHub-Delivery` 去重。最多 4 个仓库并发执行，同一仓库内部按 FIFO 顺序处理。PR 审查会核对提交前后的 `head.sha`，若分支已更新则跳过旧提交评论，并通过隐藏 HTML 标记避免重复发布。
+- **GitHub Webhook 队列（`Reviews`）**：逐仓库选择 PR 审查、Issue 分诊和卡片。模型任务要求 `X-Hub-Signature-256` 验签和 GitHub Token，SQLite `deliveries` 表按 `X-GitHub-Delivery` 去重。无密钥卡片使用独立去重键，投递上限为每分钟 30 条，接收新卡片时清理超过 1 天的去重记录。最多 4 个仓库并发执行，同一仓库内按 FIFO 顺序处理。PR 审查会核对 `head.sha` 并用隐藏标记避免重复评论。
+- **Issue 标签**：原生分诊工具分页读取仓库标签，按当前仓库和 Issue 编号追加已读取的标签。写入由 GitHub 的 `Issues` 权限控制，已有标签保留。标签写入和评论发布使用各自的触发条件。

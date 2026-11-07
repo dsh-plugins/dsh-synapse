@@ -9,6 +9,7 @@ import {
 } from "./feature-config.js";
 import { pathsFor, safePath, atomicWrite } from "./files.js";
 import type { SynapseConfig, SynapseContext } from "./types.js";
+import { newRepository, REPOSITORY_PATTERN } from "./github-repositories.js";
 
 /** 平铺布局的顶层字段；出现任一字段即需要迁移到分组结构。 */
 const FLAT_KEYS = [
@@ -60,9 +61,8 @@ export function restructureConfig(raw: any): any {
       enabled: raw.githubEnabled,
       token: raw.githubToken,
       webhookSecret: raw.webhookSecret,
-      // 旧版多行文本不校验格式；格式不对的项会让机器人整组作废，这里只保留合法项，原值留在备份文件里。
       allowedRepositories: typeof raw.repositories === "string"
-        ? raw.repositories.split(/\s+/).filter((item) => /^[\w.-]+\/(?:[\w.-]+|\*)$/.test(item))
+        ? raw.repositories.split(/\s+/)
         : undefined,
       publishReviews: raw.publishReviews,
       maxDiffChars: raw.maxDiffChars,
@@ -121,17 +121,33 @@ function finish(c: any): SynapseConfig {
   return validateConfig(validateValues(template.fields, c) as unknown as SynapseConfig);
 }
 
-/** 迁移旧配置并返回新结构；已是分组结构时返回 undefined。 */
+/** 把旧仓库名单迁移为只有卡片开启的连接，原值保存在迁移备份中。 */
+function migrateRepositories(c: any) {
+  if (!c.github || !Object.hasOwn(c.github, "allowedRepositories")) { return c; }
+  const { allowedRepositories, ...github } = c.github;
+  const seen = new Set<string>();
+  const pattern = new RegExp(REPOSITORY_PATTERN);
+  const repositories = [];
+  for (const name of allowedRepositories ?? []) {
+    if (typeof name !== "string" || !pattern.test(name) || seen.has(name.toLowerCase())) { continue; }
+    seen.add(name.toLowerCase());
+    repositories.push(newRepository(name));
+  }
+  return { ...c, github: { ...github, repositories: github.repositories ?? repositories } };
+}
+
+/** 迁移旧布局和仓库名单，当前结构无需重写磁盘。 */
 export function migrateConfig(raw: any): { value: SynapseConfig; legacy: boolean } | undefined {
   const isLegacy = legacy(raw);
   if (!isLegacy && !flat(raw)) {
-    return undefined;
+    const c = migrateRepositories(raw);
+    return c === raw ? undefined : { value: finish(c), legacy: false };
   }
   const c = restructureConfig(raw);
   if (isLegacy) {
     migrateLegacy(raw, c);
   }
-  return { value: finish(c), legacy: isLegacy };
+  return { value: finish(migrateRepositories(c)), legacy: isLegacy };
 }
 
 async function readRaw(profile: string): Promise<{ value: any; revision: number } | undefined> {
@@ -178,7 +194,8 @@ export async function registerConfig(ctx: SynapseContext) {
       const migrated = migration.legacy ? await mergeLiveFeatures(paths.profile, migration.value) : migration.value;
       const backup = await safePath(
         paths.profile, "data", "dsh-synapse",
-        migration.legacy ? "config-before-forms.json" : "config-before-restructure.json",
+        migration.legacy ? "config-before-forms.json"
+          : flat(snapshot.value) ? "config-before-restructure.json" : "config-before-github-repositories.json",
       );
       await atomicWrite(backup, JSON.stringify(snapshot, null, 2));
       await handle.update(migrated, snapshot.revision);

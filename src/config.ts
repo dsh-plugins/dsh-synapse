@@ -5,6 +5,7 @@ import { panels } from "./operation-panels.js";
 import { activityField, validateActivity } from "./activity-config.js";
 import { validateMemoryModel } from "./online-models.js";
 import { validateSpeech } from "./speech.js";
+import { REPOSITORY_PATTERN, repositoryName } from "./github-repositories.js";
 import {
   text,
   flag,
@@ -89,14 +90,20 @@ export const template = defineConfig({
         description: "一轮回复最多执行多少个模型步骤，也用于记忆与 Skill 总结子代理。-1 表示不限制；0 表示不执行任何步骤。",
       },
     ], COLLAPSED),
-    object("github", "GitHub 审查", [
-      { ...flag("enabled", "启用 Webhook 审查"), description: "开启前需要填写 Webhook Secret、Token 和至少一个允许的仓库。" },
+    object("github", "GitHub Webhook", [
+      { ...flag("enabled", "启用 GitHub Webhook"), description: "先添加仓库连接，再按仓库选择接收的功能。" },
       { ...text("webhookSecret", "Webhook Secret", "", "password"), description: "与 GitHub Webhook 设置中的 Secret 保持一致。" },
-      { ...text("token", "GitHub Token", "", "password"), description: "需要仓库读取权限；自动发布评论还需要 Issues 与 Pull requests 写权限。" },
+      { ...flag("allowUnsignedCards", "允许无密钥 Webhook 发送卡片"), description: "允许没有签名的请求为已配置仓库生成卡片。审查和分诊始终需要有效签名。" },
+      { ...text("token", "GitHub Token", "", "password"), description: "审查和分诊需要对应仓库的读取权限。Issue 标签需要 Issues 写权限，PR 评论需要 Pull requests 写权限。" },
       {
-        // 机器人只要发现一项格式不对就整组作废并改用内置白名单，所以每一项都在保存时校验。
-        ...array("allowedRepositories", "允许的仓库", { type: "text", key: "item", label: "仓库", pattern: "^[\\w.-]+\\/(?:[\\w.-]+|\\*)$" }),
-        description: "每项填写一个 owner/repo，或用 owner/* 允许该账号下的全部仓库；不能留空项或带空格。",
+        ...array("repositories", "仓库连接", object("item", "仓库", [
+          { type: "text", key: "repository", label: "仓库", required: true, pattern: REPOSITORY_PATTERN },
+          flag("reviewPr", "PR 审查"),
+          flag("triageIssues", "Issue 分诊"),
+          flag("sendCards", "生成与发送卡片", true),
+        ])),
+        description: "填写 owner/repo 或 owner/*。单个仓库的开关优先于组织规则。卡片发送到该仓库订阅的 QQ 群。",
+        dialog: { id: "github-repositories", label: "管理仓库连接" },
       },
       flag("publishReviews", "把审查结果发布为评论"),
       { ...num("maxDiffChars", "差异内容上限（字符）", 80000, 1000, 500000), description: "PR 差异超过该长度后截断，审查结果会注明覆盖不完整。" },
@@ -198,14 +205,13 @@ export function validateConfig(c: SynapseConfig) {
     c.modules.github.subscriptions.map((s) => s.repository.toLowerCase()),
     "GitHub 订阅仓库",
   );
-  for (const s of c.modules.github.subscriptions)
-    if (!/^[\w.-]+\/[\w.-]+$/.test(s.repository))
+  for (const s of c.modules.github.subscriptions) {
+    if (!repositoryName(s.repository)) {
       throw new Error("GitHub 订阅仓库格式应为 owner/repo");
-  if (
-    c.github.enabled &&
-    (!c.github.webhookSecret || !c.github.token || !c.github.allowedRepositories.length)
-  )
-    throw new Error("启用 GitHub 需要 Secret、Token 和仓库允许列表");
+    }
+  }
+  const { github } = c;
+  unique(github.repositories.map(row => row.repository.toLowerCase()), "GitHub 仓库连接");
   const integers = (value: unknown) => {
     if (typeof value === "number" && !Number.isSafeInteger(value))
       throw new Error("数量和号码必须是安全整数");

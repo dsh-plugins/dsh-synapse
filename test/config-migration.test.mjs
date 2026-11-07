@@ -9,6 +9,7 @@ import { ConfigStore } from "../node_modules/@dsh-plugin/dsh-loader/dist/service
 import { template, validateConfig } from "../lib/host/config.js";
 import { registerConfig, migrateConfig } from "../lib/host/config-migration.js";
 import { featureFiles } from "../lib/host/feature-config.js";
+import { newRepository } from "../lib/host/github-repositories.js";
 
 async function profileFixture(t, value, revision) {
   const home = await mkdtemp(path.join(os.tmpdir(), "synapse-migrate-"));
@@ -80,7 +81,7 @@ test("平铺配置迁移到分组结构，保留全部值并备份原文件", as
   assert.deepEqual(c.limits, { sessionPermission: "workspace-write", timeoutSec: -1, maxToolRounds: 12 });
   assert.deepEqual(c.github, {
     enabled: true, webhookSecret: "hook-secret", token: "gh-secret",
-    allowedRepositories: ["foo/bar", "example/*"], publishReviews: true, maxDiffChars: 2000,
+    allowUnsignedCards: false, repositories: [newRepository("foo/bar"), newRepository("example/*")], publishReviews: true, maxDiffChars: 2000,
   });
   assert.deepEqual(
     { ...c.memory, embeddingModel: undefined, rerankModel: undefined },
@@ -139,17 +140,40 @@ test("迁移后的功能文件与重构前构建生成的快照逐字一致", as
   }
 });
 
-test("允许的仓库逐项校验，迁移时丢弃旧版多行文本中的无效项", () => {
+test("仓库连接逐项校验，迁移时丢弃旧版多行文本中的无效项", () => {
   const c = defaultsFor(template.fields);
   Object.assign(c.github, { enabled: true, token: "gh-example", webhookSecret: "secret-example" });
-  for (const items of [[], [""], [" foo/bar "], ["foo"], ["foo/bar", "foo bar/x"]]) {
-    c.github.allowedRepositories = items;
+  for (const items of [[""], [" foo/bar "], ["foo"], ["foo/bar", "foo bar/x"], ["foo/.."], ["foo/bar\n"]]) {
+    c.github.repositories = items.map(newRepository);
     assert.throws(() => validateConfig(validateValues(template.fields, c)), items.join(","));
   }
-  c.github.allowedRepositories = ["foo/bar", "example/*"];
+  c.github.repositories = ["foo/bar", "example/*"].map(newRepository);
   assert.doesNotThrow(() => validateConfig(validateValues(template.fields, c)));
   const migrated = migrateConfig({ ...flatConfig(), repositories: "foo/bar\n\nbad entry example/*\nfoo" }).value;
-  assert.deepEqual(migrated.github.allowedRepositories, ["foo/bar", "example/*"]);
+  assert.deepEqual(migrated.github.repositories, ["foo/bar", "example/*"].map(newRepository));
+});
+
+test("现有分组仓库名单迁移后只开启卡片并保留订阅与凭据", async t => {
+  const old = defaultsFor(template.fields);
+  delete old.github.repositories;
+  delete old.github.allowUnsignedCards;
+  Object.assign(old.github, { enabled: true, token: "旧令牌", webhookSecret: "旧密钥", allowedRepositories: ["foo/bar", "FOO/BAR", "foo/*"] });
+  old.modules.github.subscriptions = [{ repository: "foo/bar", groups: [51] }];
+  const f = await profileFixture(t, old, 11);
+  const handle = await registerConfig(f.ctx);
+  t.after(() => handle.dispose());
+  const { value, revision } = handle.get();
+  assert.equal(revision, 12);
+  assert.deepEqual(value.github.repositories, [
+    { repository: "foo/bar", reviewPr: false, triageIssues: false, sendCards: true },
+    { repository: "foo/*", reviewPr: false, triageIssues: false, sendCards: true },
+  ]);
+  assert.equal(value.github.webhookSecret, "旧密钥");
+  assert.equal(value.github.token, "旧令牌");
+  assert.equal(value.github.allowUnsignedCards, false);
+  assert.deepEqual(value.modules.github.subscriptions, old.modules.github.subscriptions);
+  const backup = JSON.parse(await readFile(path.join(f.profile, "data/dsh-synapse/config-before-github-repositories.json"), "utf8"));
+  assert.deepEqual(backup.value, old);
 });
 
 test("表单化之前的旧配置迁移，保留聊天命令写入的功能文件并脱敏密钥", async (t) => {

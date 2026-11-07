@@ -16,6 +16,7 @@ export interface RunContext {
   title?: string;
   route?: ChatRoute;
   submission?: NativeSubmission;
+  tools?: AvailableTool[];
 }
 /** 原生输入的可恢复提交标识；只有持久化成功后才确认背景批次。 */
 export interface NativeSubmission {
@@ -69,12 +70,21 @@ export interface LimitsConfig {
   timeoutSec: number;
   maxToolRounds: number;
 }
-/** GitHub Webhook 审查；allowedRepositories 每项为 owner/repo 或 owner/*。 */
+/** 仓库连接的独立功能开关，仓库名可使用 owner/* 匹配组织。 */
+export interface GithubRepository {
+  repository: string;
+  reviewPr: boolean;
+  triageIssues: boolean;
+  sendCards: boolean;
+}
+
+/** GitHub Webhook 的验签、仓库连接及审查输出设置。 */
 export interface GithubReviewConfig {
   enabled: boolean;
   token: string;
   webhookSecret: string;
-  allowedRepositories: string[];
+  allowUnsignedCards: boolean;
+  repositories: GithubRepository[];
   publishReviews: boolean;
   maxDiffChars: number;
 }

@@ -74,3 +74,52 @@ test("功能弹窗的嵌套字段可新增、编辑和删除并保留其他配�
   assert.deepEqual(f.handle.get().value.modules.github.subscriptions, draft.github.subscriptions);
 
 });
+
+test("GitHub 仓库连接表默认只勾选卡片，可独立切换并保存三项功能", async t => {
+  const dom = new JSDOM("<!doctype html><body></body>", { pretendToBeVisual: true, url: "http://localhost" });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+  dom.window.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} });
+  const { createRoot } = await import("react-dom/client");
+  const { Simulate } = await import("react-dom/test-utils");
+  const { dialogs } = await loadClient({ realFacade: true });
+  const f = await operationFixture();
+  const root = createRoot(document.body.appendChild(document.createElement("div")));
+  t.after(async () => {
+    act(() => root.unmount());
+    await f.close();
+    dom.window.close();
+    delete globalThis.window;
+    delete globalThis.document;
+    delete globalThis.ResizeObserver;
+    delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+  });
+  const dialog = dialogs.find(item => item.id === "github-repositories");
+  assert.deepEqual(Array.from(dialog.field), ["github", "repositories"]);
+  let reader;
+  const setReader = read => { reader = read; return () => { reader = undefined; }; };
+  const render = value => root.render(React.createElement(dialog.component, { value, setValue: render, setReader, saving: false }));
+  act(() => render(f.handle.get().value.github.repositories));
+  const click = label => {
+    const button = [...document.querySelectorAll("button")].find(item => item.textContent === label);
+    assert(button, label);
+    act(() => button.click());
+  };
+  click("新增仓库");
+  const name = document.querySelector('input[placeholder="owner/repo"]');
+  act(() => Simulate.change(name, { target: { value: "owner/repo" } }));
+  const checkboxes = [...document.querySelectorAll('input[type="checkbox"]')];
+  assert.deepEqual(checkboxes.map(box => box.checked), [false, false, true]);
+  act(() => checkboxes[0].click());
+  act(() => checkboxes[1].click());
+  act(() => checkboxes[2].click());
+  const repositories = JSON.parse(JSON.stringify(reader()));
+  assert.deepEqual(repositories, [{ repository: "owner/repo", reviewPr: true, triageIssues: true, sendCards: false }]);
+  const current = f.handle.get();
+  await f.handle.update({ github: { ...current.value.github, repositories } }, current.revision);
+  assert.deepEqual(f.handle.get().value.github.repositories, repositories);
+  click("删除");
+  assert.equal(reader().length, 0);
+});

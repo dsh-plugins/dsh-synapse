@@ -7,7 +7,7 @@ import type {
   PluginPaths,
 } from "./types.js";
 import { nativeTool, textArgument } from "./native-tools.js";
-import { repositoryAllowed } from "./github.js";
+import { repositoryConnection } from "./github-repositories.js";
 import { onebotTools, type GroupSendCheck } from "./onebot-tools.js";
 
 async function readJson<T>(file: string, fallback: T): Promise<T> {
@@ -127,7 +127,7 @@ export function chatTools(
           Object.values(bindings.bindings ?? {}).some((names) =>
             names.some((name) => name.toLowerCase() === owner),
           );
-        if (!repositoryAllowed(repository, config().github.allowedRepositories) && !bound) {
+        if (!repositoryConnection(repository, config().github.repositories) && !bound) {
           throw new Error("仓库未在允许列表中，且其所有者未绑定 GitHub 账号");
         }
         // 聊天查询复用公开代理，不携带审查 Token，避免向聊天通道暴露私有仓库。

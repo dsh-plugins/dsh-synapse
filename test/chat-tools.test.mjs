@@ -13,7 +13,7 @@ async function fixture(t) {
   const home = await mkdtemp(path.join(os.tmpdir(), "synapse-chat-tools-"));
   t.after(() => rm(home, { recursive: true, force: true }));
   const c = defaultsFor(template.fields);
-  c.github.allowedRepositories = ["foo/*"];
+  c.github.repositories = [{ repository: "foo/*", reviewPr: false, triageIssues: false, sendCards: true }];
   Object.assign(c.memory, { enabled: false, learnMemory: false, learnSkills: false });
   c.modules.github.subscriptions = [{ repository: "foo/bar", groups: [123] }];
   c.modules.chat.admins = [7];

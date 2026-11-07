@@ -28,7 +28,7 @@ export function ReviewsPanel({ view, client }: ConfigPanelProps) {
     <ErrorNotice error={request.error}/>
     <TableArea><Arco.Table rowKey="id" data={rows} pagination={false} size="small" columns={[
       { title: "任务", dataIndex: "target" },
-      { title: "类型", dataIndex: "event", width: 110 },
+      { title: "类型", dataIndex: "event", width: 110, render: (event: string) => event === "issues" ? "Issue 分诊" : event === "pull_request" ? "PR 审查" : event },
       { title: "状态", width: 100, render: (_value, row: ReviewRow) => states[row.state] ?? row.state },
       { title: "更新时间", dataIndex: "updated", width: 170 },
       { title: "操作", width: 150, render: (_value, row: ReviewRow) => <Arco.Space><Arco.Button size="small" disabled={request.busy} onClick={() => { void read(row.id); }}>查看</Arco.Button>

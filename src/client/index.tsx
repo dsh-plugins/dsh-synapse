@@ -6,12 +6,13 @@ import type { ConfigDialogProps, DshLoaderUi } from "@dsh-plugin/dsh-loader/clie
 import { Arco } from "@dsh-plugin/dsh-loader/client";
 import { moduleFields } from "../feature-config.js";
 import { Fields, DIALOG_CSS, setAt } from "./fields.js";
-import type { SynapseConfig } from "../types.js";
+import type { GithubRepository, SynapseConfig } from "../types.js";
 import { SkillsPanel } from "./skills.js";
 import { McpPanel } from "./mcp.js";
 import { MemoryImportPanel } from "./memory.js";
 import { ReviewsPanel } from "./reviews.js";
 import { ActivityPanel } from "./activity.js";
+import { GithubRepositories } from "./github-repositories.js";
 
 export const inject = ["dshLoaderUi"];
 
@@ -47,6 +48,13 @@ export function apply(ctx: {
   effect(fn: () => (() => void) | void): unknown;
   dshLoaderUi: Pick<DshLoaderUi, "config">;
 }) {
+  ctx.dshLoaderUi.config.registerDialog<GithubRepository[]>(ctx, {
+    id: "github-repositories",
+    configId: "dsh-synapse",
+    field: ["github", "repositories"],
+    title: "GitHub 仓库连接",
+    component: GithubRepositories,
+  });
   ctx.dshLoaderUi.config.registerDialog<SynapseConfig["modules"]>(ctx, {
     id: "modules-editor",
     configId: "dsh-synapse",

@@ -68,15 +68,16 @@ Both probabilistic replies and idle messages are off by default and require both
 - **Embedding & Reranking Models**: Under **Long-Term Memory & Skills**, run each model locally or through an online service. Online mode needs a service URL, API key, and model name; the SiliconFlow URL is `https://api.siliconflow.cn/v1`. The reranking model appears and is used only after you turn on **Rerank Search Results**. Online services receive memory text and search terms and may charge for usage.
 - **Built-in Tools & MCP**: In chat, the model can query GitHub Issues/PRs, Bilibili videos, Minecraft versions/servers, the Chinese Minecraft Wiki, Modrinth versions, and recent QQ chat history, or call configured OneBot APIs after checking sender permissions. Under **MCP Management**, you can add `stdio`, `Streamable HTTP`, or `SSE` servers, test them, and select which tools the chat model may call automatically.
 
-## GitHub Reviews
+## GitHub Webhook
 
 1. Add a Webhook in your GitHub repository or organization:
    - **Payload URL**: `https://<your-dsh-domain>/hooks/dsh-synapse/github`
    - **Content type**: `application/json`
-   - **Secret**: Your webhook secret
+   - **Secret**: Set a secret for reviews and triage. Leave it blank for unsigned cards.
    - **Events**: `Pull requests`, `Issues`, and `Releases`
-2. Under **GitHub Reviews** in the plugin settings, enter the same Webhook Secret and a GitHub Token with repository read access, add each allowed repository (`owner/repo` or `owner/*`) under **Allowed Repositories**, then turn on **Enable Webhook Review**.
-3. View or retry tasks under **GitHub Review Tasks**. To post review comments back to GitHub, grant your Token write access to `Issues` and `Pull requests` and turn on **Publish Review Results as Comments**.
+2. Add `owner/repo` or `owner/*` in the repository connections table under **GitHub Webhook**. Each row has switches for PR review, Issue triage, and sending cards. Cards are enabled by default, and a repository entry takes precedence over the organization rule.
+3. Enable the webhook. For unsigned cards, turn on **Allow Unsigned Webhook Cards** and subscribe the destination QQ groups to the repository under **GitHub Repository Notifications**. Unsigned cards render the body and external resource references as text.
+4. For reviews and triage, enter the matching Webhook Secret and a GitHub Token with access to the repository. Issue triage can select existing repository labels and append them with `Issues` write permission. View or retry tasks under **GitHub Review Tasks**. To send comments back to GitHub, turn on **Publish Review Results as Comments** and grant write permission to `Issues` or `Pull requests` as appropriate.
 
 ## FAQ
 

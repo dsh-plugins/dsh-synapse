@@ -77,15 +77,16 @@
 - **嵌入与重排模型**：在 **长期记忆与 Skill** 中分别选择本机运行或在线服务。在线模式填写服务地址、API Key 与模型名称；SiliconFlow 地址为 `https://api.siliconflow.cn/v1`。开启 **检索后重新排序** 后才会显示并使用重排模型。嵌入输出维度默认 `0`，由模型决定；模型切换后会重建向量索引并保留记忆正文。在线服务会接收记忆文本和检索词，并可能产生调用费用。
 - **内置工具与 MCP**：聊天模型可直接查询 GitHub Issue/PR、B 站视频、Minecraft 版本与服务器状态、中文 Minecraft 维基、Modrinth 模组版本及当前会话的 QQ 聊天记录，也可在核对发言者权限后调用 OneBot API 或执行群管理操作。在 **MCP 管理** 中可配置并测试 `stdio`、`Streamable HTTP` 或 `SSE` 服务，勾选允许聊天模型自动调用的工具。
 
-## GitHub 审查接入
+## GitHub Webhook 接入
 
 1. 在 GitHub 仓库或组织设置中添加 Webhook：
    - **Payload URL**：`https://<你的DSH域名>/hooks/dsh-synapse/github`
    - **Content type**：`application/json`
-   - **Secret**：自定义密钥
+   - **Secret**：审查和分诊需要自定义密钥。仅发送卡片时可以留空。
    - **事件**：勾选 `Pull requests`、`Issues` 和 `Releases`
-2. 在插件设置的 **GitHub 审查** 中填入相同的 Webhook Secret、具备仓库读取权限的 GitHub Token，并在 **允许的仓库** 中逐项添加 `owner/repo` 或 `owner/*`，然后开启 **启用 Webhook 审查**。
-3. 在 **GitHub 审查任务** 表格中可查看结果或重试失败任务。如需将评论自动发回 GitHub，请为 Token 授予 `Issues` 与 `Pull requests` 写权限，并开启 **把审查结果发布为评论**。
+2. 在插件设置的 **GitHub Webhook → 管理仓库连接** 添加 `owner/repo` 或 `owner/*`。每行可以分别勾选 **PR 审查**、**Issue 分诊** 和 **生成与发送卡片**，默认只勾选卡片。单个仓库的配置优先于组织规则。
+3. 开启 **启用 GitHub Webhook**。仅发送卡片时，可开启 **允许无密钥 Webhook 发送卡片**，并在 **聊天与通知功能 → GitHub 仓库通知** 为仓库配置订阅的 QQ 群。无密钥卡片以纯文本渲染正文和外部资源引用。
+4. 启用审查或分诊时，填入与 GitHub 一致的 Webhook Secret 和具备对应仓库读取权限的 GitHub Token。Issue 分诊可以从仓库已有标签中挑选并追加标签，追加需要 `Issues` 写权限。在 **GitHub 审查任务** 可查看结果或重试失败任务。需要自动发回评论时，开启 **把审查结果发布为评论** 并授予对应的 `Issues` 或 `Pull requests` 写权限。
 
 ## 常见问题
 

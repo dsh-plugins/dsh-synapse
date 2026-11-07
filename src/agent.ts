@@ -98,6 +98,7 @@ export class Agent {
             : "");
         let voiceSent = false;
         const tools = [
+          ...(context.tools ?? []),
           ...learningTools(this.config, this.memory, this.skills, channel).filter(tool => !tool.name.endsWith("_save")),
           ...learningDelegations(this.loader, this.config, this.memory, this.skills, channel),
           ...(channel === "chat" ? chatTools(this.config, this.paths, context.route, this.checkGroupSend) : []),

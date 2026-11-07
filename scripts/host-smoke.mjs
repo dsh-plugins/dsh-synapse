@@ -358,9 +358,9 @@ try {
   assert.equal(memory.list("review").length, 0);
   assert.equal((await skills.list())[0].content, "# 流程\n已验证的步骤");
   const originalFetch = globalThis.fetch;
-  const repositories = config.github.allowedRepositories;
+  const repositories = config.github.repositories;
   try {
-    config.github.allowedRepositories = ["foo/bar"];
+    config.github.repositories = [{ repository: "foo/bar", reviewPr: false, triageIssues: false, sendCards: true }];
     let queries = 0;
     globalThis.fetch = async (input, init) => {
       init.signal.throwIfAborted();
@@ -395,7 +395,7 @@ try {
     assert.match(JSON.stringify(requests.at(-1)), /receipt-echo/);
   } finally {
     globalThis.fetch = originalFetch;
-    config.github.allowedRepositories = repositories;
+    config.github.repositories = repositories;
   }
   if (process.argv[3]) {
     // 指定旧版 sharp 入口，可在不下载模型权重时验证真实 DLL 的进程隔离。
