@@ -1,3 +1,11 @@
 - insert:
+    - id: dsh-synapse-profile-skills
+      name: '@deepseek-ai/dsh-skill-filesystem'
+      disabled: !!js "!ctx.get('profileContext')"
+      config:
+        providerName: dsh-synapse-profile
+        includeDefaultRoots: false
+        customSkillDirs:
+          - !!js "process.getBuiltinModule('node:path').join(ctx.get('profileContext').dir, 'skills')"
     - id: dsh-synapse
       name: '@dsh-plugin/dsh-synapse'

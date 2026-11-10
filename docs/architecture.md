@@ -9,7 +9,9 @@
 - **聊天工作区**：`<profile>/workspace/chat/`
 - **审查工作区**：`<profile>/workspace/review/`
 - **插件数据目录**：`<profile>/data/dsh-synapse/`
-- **Skill 目录**：`<dsh_home>/skills/`（全局继承）与 `<profile>/skills/`（当前 profile 覆盖）
+- Synapse 检索 `<dsh_home>/skills/` 与 `<profile>/skills/`，同名时优先读取当前 profile 的文件。
+
+Synapse 将当前 `<profile>/skills/` 接入 DSH 的文件系统技能提供方。带合法 YAML 头信息的技能可按其调用权限出现在原生 `skill` 和 `/` 列表中。同名技能由 DSH 按原生优先级选取。
 
 启动会话时会自动创建对应工作区目录。若宿主提供工作区注册表（如 DSH `0.2.2+`），插件会将工作区及会话登记到宿主的可见工作区列表。
 

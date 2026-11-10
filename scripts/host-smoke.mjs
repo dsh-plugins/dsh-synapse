@@ -2,9 +2,9 @@
 // No provider credentials or network requests are needed: only LLM output is stubbed.
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
-import { mkdtemp, rm, mkdir, writeFile, readFile, stat as fsStat } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, stat as fsStat } from "node:fs/promises";
 import os from "node:os";
 import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
 import { template } from "../lib/host/config.js";
@@ -43,8 +43,14 @@ try {
 let ctx;
 if (hasPresets) {
   const configPath = path.join(data, "cordis.yml");
-  await writeFile(configPath, "[]\n");
-  ctx = await (await load("dsh-app-boot")).boot("synapse-native", configPath, [], undefined, pathToFileURL(path.resolve(process.argv[2])).href);
+  await writeFile(configPath, '- id: skills\n  name: "@deepseek-ai/dsh-skill"\n');
+  const { boot, loadOverlayPatches } = await load("dsh-app-boot");
+  const patches = loadOverlayPatches("synapse-native", fileURLToPath(new URL("../cordis.patch.yml", import.meta.url)));
+  const provider = patches.flatMap(patch => patch.insert ?? []).find(row => row.id === "dsh-synapse-profile-skills");
+  assert(provider);
+  ctx = await boot("synapse-native", configPath, [{ insert: [provider] }], root => {
+    root.provide("profileContext", { dir: data, cwd: data, home: data });
+  }, pathToFileURL(path.resolve(process.argv[2])).href);
 } else {
   ctx = new Context();
 }
@@ -126,6 +132,15 @@ class FixtureFs extends Service {
     }
   }
   processPath(target) { return target.displayPath ?? target; }
+  async listDir(target) {
+    const entries = await readdir(target.displayPath, { withFileTypes: true });
+    return entries.map(entry => ({
+      name: entry.name,
+      type: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other",
+      target: { displayPath: path.join(target.displayPath, entry.name) },
+    }));
+  }
+  readText(target, signal) { return readFile(target.displayPath, { encoding: "utf8", signal }); }
   async *streamText(target, signal) {
     signal?.throwIfAborted();
     yield await readFile(target.displayPath ?? target, "utf8");
@@ -161,8 +176,7 @@ for (const name of [
   "dsh-working-directory",
   "dsh-system-prompt",
   "dsh-tools",
-  "dsh-skill",
-  ...(hasPresets ? [] : ["dsh-tool-skill"]),
+  ...(hasPresets ? [] : ["dsh-skill", "dsh-tool-skill"]),
   "dsh-tool-executor-native",
   "dsh-agent-loop",
   "dsh-user-approval",
@@ -643,6 +657,23 @@ try {
       assert((await ctx.attachments.readImage(toolImage.attachment)).data.length > 0);
       await activity.finished("native-smoke", batch.id);
     } finally { await activity.close(); }
+  }
+  if (hasPresets) {
+    await skills.save("fixture-profile", "---\nname: fixture-profile\ndescription: 验证 profile 技能发现。\n---\n原生工具读取当前 profile 的技能。");
+    await skills.save("fixture-profile-plain", "# 纯 Markdown 正文");
+    const deadline = Date.now() + 5000;
+    while (!(await ctx.skills.list()).some(skill => skill.name === "fixture-profile")) {
+      assert(Date.now() < deadline, "新增 profile 技能未进入宿主目录");
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    const start = requests.length;
+    nativeCalls.push({ name: "skill", args: { name: "fixture-profile" } });
+    await residentRun("技能验证", "读取 profile 技能");
+    assert(requests.slice(start).some(request => JSON.stringify(request.messages).includes("原生工具读取当前 profile 的技能。")),
+      JSON.stringify(requests.at(-1).messages.slice(-2)));
+    const scoped = await ctx.skills.list({ scope: ctx.agents.get(requests.at(-1).sessionId) });
+    assert(scoped.some(skill => skill.name === "fixture-profile" && skill.invocation.userInvocable));
+    assert(!scoped.some(skill => skill.name === "fixture-profile-plain"));
   }
   console.log(
     "真实 DSH 验证通过：标准预设与宿主工具、规则文件注入、通道工作区、图片附件、会话标题、权限、原生 RAG/Skill 子代理与查询工具、JSONL 恢复、取消与重置、群聊批次持久化确认与缓存图片按需 read_image" + (hasWorkspaceRegistry ? "、归档后新建与工作区列表登记。" : "。"),
