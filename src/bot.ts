@@ -20,6 +20,7 @@ export class Bot {
   stderr: string;
   private activations = new Map<string, { resolve(): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
   private restarting?: Promise<void>;
+  private closing?: Promise<void>;
   private voices = new Map<string, { resolve(receipt: VoiceReceipt): void; reject(error: Error): void }>();
   private groupChecks = new Map<string, { resolve(allowed: boolean): void; reject(error: Error): void }>();
 
@@ -35,7 +36,7 @@ export class Bot {
   }
   async start() {
     const c = this.config();
-    if (!c.enabled) return;
+    if (this.closing || !c.enabled) { return; }
     const cwd = path.join(this.paths.data, "bot");
     await mkdir(path.join(cwd, "configs", "features"), { recursive: true });
     await cp(
@@ -95,6 +96,7 @@ export class Bot {
       await atomicWrite(file, JSON.stringify(feature, null, 2));
     }
     await atomicWrite(marker, JSON.stringify(applied));
+    if (this.closing) { return; }
     this.stopping = false;
     this.state = "starting";
     this.gateway.botEpoch = randomUUID();
@@ -161,8 +163,16 @@ export class Bot {
     // Parent disconnect guarantees the upstream child cannot outlive its owner.
   }
   restart(): Promise<void> {
+    if (this.closing) { return this.closing; }
     if (!this.restarting) { this.restarting = this.stop().then(() => this.start()).finally(() => { this.restarting = undefined; }); }
     return this.restarting;
+  }
+  /** 卸载关闭优先于已排队的重启，防止旧实例重新启动 Bot。 */
+  close(): Promise<void> {
+    return this.closing ??= Promise.resolve().then(async () => {
+      try { await this.restarting; }
+      finally { await this.stop(); }
+    });
   }
   updateActivity() {
     if (this.child?.connected) {

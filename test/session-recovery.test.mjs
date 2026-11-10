@@ -112,6 +112,24 @@ test("群聊和私聊保留由宿主打开的会话，句柄释放后恢复原�
   }
 });
 
+test("重启后第一条聊天消息等待旧写入权释放，并且只提交一次到原会话", async (t) => {
+  const f = await fixture(t);
+  const resume = f.agents.resume;
+  let attempts = 0;
+  f.agents.resume = async options => {
+    if (++attempts === 1) {
+      throw Object.assign(new Error("上一实例正在关闭"), { name: "SessionAlreadyOwnedError", sessionId: f.oldId });
+    }
+    return resume(options);
+  };
+  const events = [];
+  assert.equal(await f.run(undefined, type => events.push(type), "重启后的输入"), "done");
+  assert.equal(attempts, 2);
+  assert.equal((await f.binding()).id, f.oldId);
+  assert(!events.includes("session.replaced"));
+  assert.equal(f.host.stored.get(f.oldId).filter(message => message.content?.[0]?.text === "重启后的输入").length, 1);
+});
+
 test("缓存代理已释放时，从持久化的同一 ID 恢复", async (t) => {
   const f = await fixture(t, { live: true });
   await f.host.created[0].handle.dispose();

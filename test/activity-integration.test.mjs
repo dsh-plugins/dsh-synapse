@@ -60,7 +60,7 @@ test("真实 Bot/OneBot 验证持久化背景、概率、空闲 IPC、忽略名�
   const state = new ChatState(path.join(paths.data, "chat-state.sqlite"));
   const activity = new ChatActivity({ state, config: () => c, images: new ChatImages(paths, state, () => c, () => clock), cloud: new AsyncWordCloud(path.join(paths.data, "chat-state.sqlite")), now: () => clock, random: () => 0, busy: id => agent.busy(`chat:group:${id}`), onError: error => errors.push(error.message) });
   const contexts = [];
-  const gateway = new Gateway({ run: (...args) => { contexts.push(args[8]); return agent.run(...args); }, reset: key => agent.reset(key), whenCurrentSettled: key => agent.whenCurrentSettled(key) }, () => c, error => errors.push(error.message), activity);
+  const gateway = new Gateway({ run: (...args) => { contexts.push(args[8]); return agent.run(...args); }, reset: key => agent.reset(key), whenCurrentSettled: key => agent.whenCurrentSettled(key), releaseChatSessions: () => agent.releaseChatSessions() }, () => c, error => errors.push(error.message), activity);
   await activity.recover((...args) => agent.harness.hasInput(...args)); await gateway.start();
   const bot = new Bot(paths, () => c, gateway, error => errors.push(error.message));
   activity.activate = event => bot.activate(event); activity.available = () => bot.state === "running";
@@ -111,9 +111,12 @@ test("真实 Bot/OneBot 验证持久化背景、概率、空闲 IPC、忽略名�
   assert.equal(received[2].source.origin, "system"); assert.equal(contexts[2].route.admin, false); assert.equal(contexts[2].route.userId, "42");
   assert.match(JSON.stringify(received[2]), /好久没在群里说话了，说点什么吧/);
   hold = true; send("重启前正在执行的回复", 2, true); await until(() => entered);
+  const originalSession = host.created[0].agent.id;
   await bot.restart(); hold = false; await until(() => bot.state === "running");
   assert.notEqual(bot.child.pid, pid); assert.equal(activity.status()[0].busy, false);
+  assert.equal(host.loader.services.get("agents").get(originalSession), undefined);
   send("重启之后继续", 2, true); await until(() => received.length === 5 && !activity.status()[0].busy);
+  assert.equal(host.resumed.at(-1).agent.id, originalSession);
   assert.ok(!state.messages("123").length);
   const beforeFailure = requests.length;
   clock += 301000; send("模型自动失败");
@@ -124,4 +127,10 @@ test("真实 Bot/OneBot 验证持久化背景、概率、空闲 IPC、忽略名�
   await until(() => received.length === 7 && !activity.status()[0].busy);
   assert.equal(state.logs({ type: "failure" }).filter(item => item.triggerId && /执行或发送失败/.test(item.reason)).length, 2);
   assert.deepEqual(errors, []);
+  const restarting = bot.restart();
+  await bot.close();
+  await restarting;
+  assert.equal(bot.child, null);
+  assert.equal(bot.state, "stopped");
+  assert.equal(host.loader.services.get("agents").get(originalSession), undefined);
 });

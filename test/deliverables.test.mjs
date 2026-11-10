@@ -3,8 +3,34 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { isDiscordDeliverable, readDeliverable, sendDiscordDeliverable } from "../lib/host/bot-deliverables.js";
+import { isDiscordDeliverable, readDeliverable, sendDiscordDeliverable, sendOneBotDeliverable } from "../lib/host/bot-deliverables.js";
 import { QQSendQueue } from "../lib/host/qq-send-queue.js";
+
+test("OneBot accepts explicit success without a message ID and never resends ambiguous deliveries", async () => {
+  const payload = { group_id: "100", message: [{ type: "image", data: { file: "base64://Zg==" } }] };
+  const signal = new AbortController().signal;
+  for (const [data, expected] of [
+    [{ status: "ok", retcode: 0, data: null }, "sent"],
+    [{ status: "ok", retcode: "0" }, "sent"],
+    [{ status: "failed", retcode: 1200, message: "EventChecker Failed" }, "unconfirmed"],
+    [{ status: "failed", retcode: 100, wording: "发送超时" }, "unconfirmed"],
+    [{ status: "async", retcode: 1 }, "unconfirmed"],
+    [{ status: "failed", retcode: 0 }, "unconfirmed"],
+    [{ status: "failed", retcode: 1401 }, "failed"],
+    [{}, "unconfirmed"],
+    [undefined, "unconfirmed"],
+  ]) {
+    const requests = [];
+    const api = { post: async (url, body) => {
+      requests.push({ url, body });
+      if (data === undefined) { throw new Error("socket closed after write"); }
+      return { status: 200, data };
+    } };
+    const result = await sendOneBotDeliverable(api, "send_group_msg", payload, signal);
+    assert.equal(result.status, expected, JSON.stringify(data));
+    assert.deepEqual(requests, [{ url: "/send_group_msg", body: payload }]);
+  }
+});
 
 test("Discord receives the named upload with its media type and a nonce to suppress mirroring", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "synapse-deliverables-"));
@@ -39,17 +65,41 @@ test("QQ drops queued file uploads when the group generation is muted and keeps 
   const group = new AbortController();
   const requests = [];
   const queue = new QQSendQueue({
-    request: async action => { requests.push(action); },
+    deliver: async action => { requests.push(action); return { status: "sent" }; },
     groupSignal: () => group.signal,
     onError: error => assert.fail(error),
   }, 0);
   try {
-    const discarded = queue.upload("group", "100", "base64://Zg==", "report.txt");
-    const sent = queue.upload("private", "200", "base64://Zg==", "report.txt");
+    const file = { type: "file", file: "base64://Zg==", name: "report.txt" };
+    const discarded = queue.deliver("group", "100", file);
+    const sent = queue.deliver("private", "200", file);
     group.abort();
     queue.discardAbortedGroup("100");
-    assert.deepEqual(await Promise.all([discarded, sent]), [false, true]);
+    assert.deepEqual((await Promise.all([discarded, sent])).map(receipt => receipt.status), ["failed", "sent"]);
     assert.deepEqual(requests, ["upload_private_file"]);
+  } finally {
+    queue.close();
+  }
+});
+
+test("cancelling a OneBot request in progress leaves the delivery unconfirmed", async () => {
+  const group = new AbortController();
+  const started = Promise.withResolvers();
+  const queue = new QQSendQueue({
+    deliver: async (_action, _payload, signal) => {
+      started.resolve();
+      await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
+      return { status: "unconfirmed", reason: "连接关闭" };
+    },
+    groupSignal: () => group.signal,
+    onError: error => assert.fail(error),
+  }, 0);
+  try {
+    const sending = queue.deliver("group", "100", { type: "image", file: "base64://Zg==" });
+    await started.promise;
+    group.abort();
+    queue.discardAbortedGroup("100");
+    assert.equal((await sending).status, "unconfirmed");
   } finally {
     queue.close();
   }

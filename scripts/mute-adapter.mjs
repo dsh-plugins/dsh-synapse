@@ -60,7 +60,7 @@ export function muteAdapter(contents, file, vendor) {
       const { runId } = await this.hermes.submitRun({
         signal: route.synapseSignal,`);
     replace("      bot.logger?.info(`[Hermes] run 已提交: ${runId}`);", `      if (route.synapseSignal?.aborted) { await this.hermes.stopRun(runId); throw route.synapseSignal.reason; }
-      bot.logger?.info('[Hermes] run 已提交: ' + runId);`);
+      bot.logger?.info('[Synapse] DSH 任务已提交: ' + runId);`);
     replace("if (!synapse?.automatic) { await this.sendReplyWithMention", "if (!synapse?.automatic && !route.synapseSignal?.aborted) { await this.sendReplyWithMention");
     replace("  private async finishRunBody(run: RunState): Promise<void> {", "  private async finishRunBody(run: RunState): Promise<void> {\n    if (run.route.synapseSignal?.aborted) { run.synapseSendFailed = true; await this.drainSends(run); return; }");
     replace("        'message.delta': ev => {", "        'message.delta': ev => {\n          if (route.synapseSignal?.aborted) { return; }");

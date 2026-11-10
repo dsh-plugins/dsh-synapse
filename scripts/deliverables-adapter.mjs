@@ -8,8 +8,8 @@ export function deliverablesAdapter(contents, file, vendor) {
   };
   const sender = JSON.stringify(path.resolve("src/bot-deliverables.ts"));
   if (file === path.join(vendor, "src", "index.ts")) {
-    replace("  public sendPrivateMsg(", `  public uploadSynapseFile(type: 'group' | 'private', id: string, file: string, name: string, signal: AbortSignal): Promise<boolean> {
-    return this.synapseSendQueue.upload(type, id, file, name, signal);
+    replace("  public sendPrivateMsg(", `  public deliverSynapseFile(type: 'group' | 'private', id: string, delivery: QQDelivery, signal: AbortSignal): Promise<QQDeliveryReceipt> {
+    return this.synapseSendQueue.deliver(type, id, delivery, signal);
   }
 
   public sendPrivateMsg(`);
@@ -51,6 +51,7 @@ export function deliverablesAdapter(contents, file, vendor) {
     if (!run.synapsePresented?.length || !bot || !run.synapseDelivery) { return; }
     const delivery = route.synapseSignal ? AbortSignal.any([run.synapseDelivery.signal, route.synapseSignal]) : run.synapseDelivery.signal;
     let failed = 0;
+    let unconfirmed = 0;
     for (const file of run.synapsePresented) {
       if (delivery.aborted) { run.synapseSendFailed = true; return; }
       const signal = AbortSignal.any([delivery, AbortSignal.timeout(120000)]);
@@ -60,7 +61,13 @@ export function deliverablesAdapter(contents, file, vendor) {
           await route.discord!.sendDeliverable(item, signal);
         } else {
           const type = route.type === 'group' ? 'group' : 'private';
-          await sendQQDeliverable(bot, type, route.type === 'group' ? route.groupId! : route.userId, item, signal);
+          const receipt = await sendQQDeliverable(bot, type, route.type === 'group' ? route.groupId! : route.userId, item, signal);
+          if (delivery.aborted) { run.synapseSendFailed = true; return; }
+          if (receipt.status === 'failed') { throw new Error(receipt.reason); }
+          if (receipt.status === 'unconfirmed') {
+            unconfirmed++;
+            bot.logger?.warn('[Synapse] 交付文件发送未确认（' + route.type + '）：' + receipt.reason);
+          }
         }
       } catch (error) {
         if (delivery.aborted) { run.synapseSendFailed = true; return; }
@@ -68,10 +75,11 @@ export function deliverablesAdapter(contents, file, vendor) {
         bot.logger?.warn('[Synapse] 交付文件发送失败（' + route.type + '）：' + (error as Error).message);
       }
     }
-    if (failed) {
-      run.synapseSendFailed = true;
-      await this.sendReplyWithMention(route, '有 ' + failed + ' 个交付文件发送失败。', run.userMsgId);
-    }
+    if (failed) { run.synapseSendFailed = true; }
+    const notices = [];
+    if (failed) { notices.push('有 ' + failed + ' 个交付文件发送失败。'); }
+    if (unconfirmed) { notices.push('有 ' + unconfirmed + ' 个交付文件发送结果未确认。'); }
+    if (notices.length) { await this.sendReplyWithMention(route, notices.join('\\n'), run.userMsgId); }
   }
 
   /** finishRun 主体`);

@@ -499,6 +499,13 @@ try {
   await residentRun("恢复聊天", "会话释放后继续");
   assert.equal(requests.at(-1).sessionId, binding.id);
   assert.match(JSON.stringify(requests.at(-1).messages), /after explicit reset/);
+  await harness.releaseChatSessions();
+  assert.equal(ctx.agents.get(binding.id), undefined);
+  const closingWriter = await ctx.sessionPersistence.open(binding.id, "write");
+  const releaseWriter = new Promise(resolve => setTimeout(resolve, 250)).then(() => closingWriter.close());
+  await Promise.all([residentRun("恢复聊天", "等待旧写入句柄关闭"), releaseWriter]);
+  assert.equal(requests.at(-1).sessionId, binding.id);
+  assert.match(JSON.stringify(requests.at(-1).messages), /会话释放后继续/);
   const delegated = [];
   const delegationLimit = config.limits.maxToolRounds;
   const offDelegated = ctx.on("subagent/start", (info) => {

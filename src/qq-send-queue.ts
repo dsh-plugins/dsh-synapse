@@ -1,7 +1,11 @@
 /** 用于排队发送的 OneBot 消息段，保留协议端的段数据。 */
 export interface QQSegment { type: string; data?: any }
 /** 区分桥接、通知及需要独立消息 ID 的发送请求。 */
-export interface QQSendOptions { fromBridge?: boolean; fromWebhook?: boolean; localOnly?: boolean; merge?: boolean; signal?: AbortSignal }
+export interface QQSendOptions { fromBridge?: boolean; fromWebhook?: boolean; merge?: boolean; signal?: AbortSignal }
+/** 交付只需要确认请求结果，聊天消息 ID 仍由普通发送接口管理。 */
+export type QQDeliveryReceipt = { status: "sent" } | { status: "failed" | "unconfirmed"; reason: string };
+/** 交付媒体使用消息段，普通文件使用 OneBot 上传动作。 */
+export type QQDelivery = { type: "image" | "video"; file: string } | { type: "file"; file: string; name: string };
 interface SendTask {
   parts: QQSegment[][];
   options: QQSendOptions;
@@ -9,16 +13,16 @@ interface SendTask {
   resolve: ((id: number | undefined) => void)[];
 }
 interface OperationTask { work: () => void | Promise<void> }
-interface UploadTask {
-  file: string;
-  name: string;
+interface DeliveryTask {
+  delivery: QQDelivery;
   options: QQSendOptions;
-  confirm: (sent: boolean) => void;
+  confirm: (receipt: QQDeliveryReceipt) => void;
 }
-type Task = SendTask | OperationTask | UploadTask;
+type Task = SendTask | OperationTask | DeliveryTask;
 interface Outbox { type: "group" | "private" | "operation"; id: string | number; tasks: Task[]; busy: boolean; ready: boolean; preparing: boolean; controller: AbortController; active?: Task }
 interface QueueOptions {
-  request(action: string, payload: Record<string, unknown>, signal: AbortSignal, deliverable?: boolean): Promise<number | undefined>;
+  request(action: string, payload: Record<string, unknown>, signal: AbortSignal): Promise<number | undefined>;
+  deliver(action: string, payload: Record<string, unknown>, signal: AbortSignal): Promise<QQDeliveryReceipt>;
   limits(): { compactMaxChars: number; compactMaxLines: number; maxMessageLength: number; botName: string };
   identity(): { user_id: string | number; nickname?: string } | Promise<{ user_id: string | number; nickname?: string }>;
   canSendGroup?(groupId: string): boolean | Promise<boolean>;
@@ -30,6 +34,8 @@ interface PreparedMessage { message: QQSegment[]; forward: boolean; limits: Retu
 
 const mergeableTypes = new Set(["text", "at", "reply", "image", "face", "node"]);
 const quote = (parts: QQSegment[][]) => parts.flat().find(segment => segment.type === "reply")?.data?.id;
+const cancelledDelivery: QQDeliveryReceipt = { status: "failed", reason: "QQ 交付请求已在发送前取消" };
+const interruptedDelivery: QQDeliveryReceipt = { status: "unconfirmed", reason: "QQ 交付请求发送过程中被取消，未收到回执" };
 
 /** 每个 QQ 会话独立合并待发消息，共用全局发送间隔。 */
 export class QQSendQueue {
@@ -53,7 +59,7 @@ export class QQSendQueue {
     const key = `${type}:${id}`;
     const outbox = this.get(key, type, id);
     const parts = [structuredClone(message)];
-    const mergeable = options.merge !== false && !options.fromBridge && !options.localOnly && message.every(segment => mergeableTypes.has(segment.type)
+    const mergeable = options.merge !== false && !options.fromBridge && message.every(segment => mergeableTypes.has(segment.type)
       && (segment.type !== "node" || typeof segment.data?.content === "string" || Array.isArray(segment.data?.content)));
     return new Promise(resolve => {
       const tail = outbox.tasks.at(-1);
@@ -72,14 +78,14 @@ export class QQSendQueue {
     });
   }
 
-  /** 文件上传与同会话消息共用顺序、发送间隔和禁言检查。 */
-  upload(type: "group" | "private", id: string, file: string, name: string, signal?: AbortSignal): Promise<boolean> {
+  /** 独立交付与同会话消息共用顺序、发送间隔和禁言检查。 */
+  deliver(type: "group" | "private", id: string, delivery: QQDelivery, signal?: AbortSignal): Promise<QQDeliveryReceipt> {
     signal = this.sendSignal(type, id, signal);
-    if (this.closed || signal?.aborted) { return Promise.resolve(false); }
+    if (this.closed || signal?.aborted) { return Promise.resolve(cancelledDelivery); }
     const key = `${type}:${id}`;
     const outbox = this.get(key, type, id);
     return new Promise(confirm => {
-      outbox.tasks.push({ file, name, options: { signal }, confirm });
+      outbox.tasks.push({ delivery, options: { signal }, confirm });
       this.enqueue(key, outbox);
     });
   }
@@ -99,7 +105,7 @@ export class QQSendQueue {
     if (!outbox) { return; }
     outbox.controller.abort(new Error(`QQ 群 ${groupId} 的待发消息已取消`));
     for (const task of outbox.tasks.splice(0)) { this.settle(task); }
-    if (outbox.active) { this.settle(outbox.active); }
+    if (outbox.active) { this.settle(outbox.active, undefined, interruptedDelivery); }
     this.outboxes.delete(key);
     this.ready = this.ready.filter(item => item !== key);
     this.schedule();
@@ -113,7 +119,9 @@ export class QQSendQueue {
       if ("options" in task && task.options.signal?.aborted) { this.settle(task); return false; }
       return true;
     });
-    if (outbox.active && "options" in outbox.active && outbox.active.options.signal?.aborted) { this.settle(outbox.active); }
+    if (outbox.active && "options" in outbox.active && outbox.active.options.signal?.aborted) {
+      this.settle(outbox.active, undefined, interruptedDelivery);
+    }
     if (!outbox.tasks.length && !outbox.busy) { this.discardGroup(groupId); }
   }
 
@@ -128,7 +136,7 @@ export class QQSendQueue {
       }
     }
     for (const task of this.active) {
-      this.settle(task);
+      this.settle(task, undefined, interruptedDelivery);
     }
     this.outboxes.clear();
     this.ready = [];
@@ -290,7 +298,7 @@ export class QQSendQueue {
 
   private async execute(outbox: Outbox, task: Task, prepared?: PreparedMessage): Promise<void> {
     let id: number | undefined;
-    let uploaded = false;
+    let receipt: QQDeliveryReceipt | undefined;
     try {
       if ("work" in task) {
         await task.work();
@@ -299,10 +307,11 @@ export class QQSendQueue {
       const signal = AbortSignal.any([this.shutdown.signal, outbox.controller.signal, ...(task.options.signal ? [task.options.signal] : [])]);
       signal.throwIfAborted();
       const recipient = { [`${outbox.type === "group" ? "group" : "user"}_id`]: outbox.id };
-      if ("file" in task) {
-        await this.options.request(`upload_${outbox.type}_file`, { ...recipient, file: task.file, name: task.name }, signal, true);
-        signal.throwIfAborted();
-        uploaded = true;
+      if ("delivery" in task) {
+        const delivery = task.delivery;
+        receipt = delivery.type === "file"
+          ? await this.options.deliver(`upload_${outbox.type}_file`, { ...recipient, file: delivery.file, name: delivery.name }, signal)
+          : await this.options.deliver(`send_${outbox.type}_msg`, { ...recipient, message: [{ type: delivery.type, data: { file: delivery.file } }] }, signal);
         return;
       }
       const { limits, message, forward } = prepared;
@@ -330,31 +339,34 @@ export class QQSendQueue {
         }
         payload = { ...recipient, messages: nodes };
       }
-      id = await this.options.request(`send_${outbox.type}_${forward ? "forward_msg" : "msg"}`, payload, signal, task.options.localOnly);
+      id = await this.options.request(`send_${outbox.type}_${forward ? "forward_msg" : "msg"}`, payload, signal);
       signal.throwIfAborted();
       if (id === undefined) {
         throw new Error(`QQ ${outbox.type}:${outbox.id} 发送失败，OneBot 未返回消息 ID`);
       }
-      if (!this.closed && outbox.type === "group" && !task.options.localOnly) {
+      if (!this.closed && outbox.type === "group") {
         this.options.sent({ groupId: Number(outbox.id), message, messageId: id, fromBridge: Boolean(task.options.fromBridge), fromWebhook: Boolean(task.options.fromWebhook) });
       }
     } catch (error) {
       id = undefined;
-      if (!this.closed) {
+      if ("delivery" in task && !task.options.signal?.aborted) {
+        receipt = { status: "failed", reason: "QQ 交付请求未完成" };
+      }
+      if (!this.closed && !("delivery" in task && task.options.signal?.aborted)) {
         this.options.onError(new Error(`QQ ${outbox.type}:${outbox.id} 发送失败：${error instanceof Error ? error.message : String(error)}`, { cause: error }));
       }
     } finally {
-      this.settle(task, this.closed ? undefined : id, !this.closed && uploaded);
+      this.settle(task, this.closed ? undefined : id, receipt);
     }
   }
 
-  private settle(task: Task, id?: number, uploaded = false): void {
+  private settle(task: Task, id?: number, receipt = cancelledDelivery): void {
     if ("resolve" in task) {
       for (const resolve of task.resolve) {
         resolve(id);
       }
     } else if ("confirm" in task) {
-      task.confirm(uploaded);
+      task.confirm(receipt);
     }
   }
 }

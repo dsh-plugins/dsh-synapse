@@ -89,20 +89,18 @@ await build({
               }
               contents = contents.slice(0, start) + replacement + contents.slice(end);
             };
-            contents = `import { QQSendQueue } from ${JSON.stringify(path.resolve("src/qq-send-queue.ts"))};\nimport { getHermesConfig } from '@/features/hermes/config';\nimport { getGithubSubscribers } from '@/config/features';\n${contents}`;
+            contents = `import { QQSendQueue, type QQDelivery, type QQDeliveryReceipt } from ${JSON.stringify(path.resolve("src/qq-send-queue.ts"))};\nimport { sendOneBotDeliverable } from ${JSON.stringify(path.resolve("src/bot-deliverables.ts"))};\nimport { getHermesConfig } from '@/features/hermes/config';\nimport { getGithubSubscribers } from '@/config/features';\n${contents}`;
             replace("  private operationQueue: (() => void)[] = [];", "  private readonly synapseSendQueue: QQSendQueue;");
             replace("  private lastOperationHandle = -1;\n", "");
             replace("    setInterval(() => this.handlerOperationQueue(this), 2000);", `    this.synapseSendQueue = new QQSendQueue({
-      request: async (action, payload, signal, deliverable) => {
-        const response = await this.axiosInstance.post('/' + action, payload, { signal, ...(deliverable ? { timeout: 120000 } : {}) });
-        if (deliverable && (response.data?.status === 'failed' || String(response.data?.retcode) !== '0')) {
-          throw new Error('OneBot 未确认交付发送成功：' + action);
-        }
+      request: async (action, payload, signal) => {
+        const response = await this.axiosInstance.post('/' + action, payload, { signal });
         if (response.data?.retcode && response.data.retcode !== 0) {
           throw new Error('OneBot 发送失败：' + (response.data.wording || response.data.message || response.data.retcode));
         }
         return response.data?.data?.message_id;
       },
+      deliver: (action, payload, signal) => sendOneBotDeliverable(this.axiosInstance, action, payload, signal),
       limits: () => getHermesConfig(),
       identity: () => this.getLoginInfo(),
       sent: event => this.notifyGroupMessageSent(event as GroupMessageSentEvent),
@@ -380,6 +378,10 @@ await build({
           contents = speechAdapter(contents, file, vendor);
           contents = muteAdapter(contents, file, vendor);
           contents = deliverablesAdapter(contents, file, vendor);
+          contents = contents.replaceAll("[Hermes]", "[Synapse]")
+            .replaceAll("[DiscordBridge] Hermes ", "[DiscordBridge] Synapse ")
+            .replaceAll("调用 Hermes 失败", "提交 DSH 任务失败")
+            .replaceAll("未收到 Hermes 响应", "未收到 DSH 响应");
           return { contents, loader: "ts" };
         });
       },

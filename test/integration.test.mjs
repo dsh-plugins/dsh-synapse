@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { once } from "node:events";
@@ -14,7 +14,7 @@ import { Bot } from "../lib/host/bot.js";
 import { Gateway } from "../lib/host/gateway.js";
 import { Agent } from "../lib/host/agent.js";
 import { hostFixture } from "./fixtures/host.mjs";
-import { apply } from "../lib/host/index.js";
+import { apply, createService } from "../lib/host/index.js";
 import { ChatState } from "../lib/host/chat-state.js";
 import { ChatImages } from "../lib/host/chat-images.js";
 import { ChatActivity } from "../lib/host/chat-activity.js";
@@ -27,6 +27,12 @@ const waitFor = async (fn, ms = 10000) => {
   }
   throw new Error("Timed out waiting for integration state");
 };
+
+async function readBotLog(data) {
+  const directory = path.join(data, "bot", "logs");
+  const files = (await readdir(directory)).filter(name => /\.log(?:\.\d+)?$/.test(name));
+  return (await Promise.all(files.map(name => readFile(path.join(directory, name), "utf8")))).join("\n");
+}
 test("real MCP stdio discovery, allowlist and invocation", async () => {
   const c = defaultsFor(template.fields);
   c.mcpServers = [
@@ -92,6 +98,14 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
       res.writeHead(200, { "Content-Type": "audio/mpeg" }); res.end(voiceAudio); return;
     }
     res.setHeader("Content-Type", "application/json");
+    if (req.url === "/send_group_msg" && Array.isArray(payload.message) && payload.message.some(segment => segment.type === "image")) {
+      res.end(JSON.stringify({ status: "ok", retcode: "0", data: null }));
+      return;
+    }
+    if (req.url === "/send_group_msg" && Array.isArray(payload.message) && payload.message.some(segment => segment.type === "video")) {
+      res.end(JSON.stringify({ status: "failed", retcode: 1200, message: "EventChecker Failed" }));
+      return;
+    }
     res.end(
       JSON.stringify({
         status: "ok",
@@ -316,6 +330,7 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     }
     await waitFor(() => requests.slice(presentStart).filter(item => item.body.message?.some(segment => segment.type === "video")).length === 2, 20000);
     await waitFor(() => requests.slice(presentStart).some(item => item.url === "/send_group_msg" && JSON.stringify(item.body).includes("有 1 个交付文件发送失败")));
+    assert(requests.slice(presentStart).some(item => item.url === "/send_group_msg" && JSON.stringify(item.body).includes("有 1 个交付文件发送结果未确认")));
     const delivered = requests.slice(presentStart);
     for (const [type, target, id] of [["group", "group_id", 123], ["private", "user_id", 1]]) {
       const uploads = delivered.filter(item => item.url === `/upload_${type}_file`);
@@ -339,12 +354,12 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     }
     await waitFor(() => requests.slice(cancelStart).some(item => item.url === "/send_group_msg" && JSON.stringify(item.body).includes("已停止当前任务")));
     assert(!requests.slice(cancelStart).some(item => item.body.message?.some(segment => segment.type === "video")));
+    const botLog = await readBotLog(data);
+    assert.match(botLog, /\[Synapse\] DSH 任务已提交/);
+    assert.doesNotMatch(botLog, /\[Hermes\]/);
     assert.deepEqual(errors, []);
   } catch (e) {
-    const log = await readFile(
-      path.join(data, "bot/logs/latest.log"),
-      "utf8",
-    ).catch(() => "(no upstream log)");
+    const log = await readBotLog(data).catch(() => "(no upstream log)");
     throw new Error(
       e.message +
         "\n" +
@@ -433,7 +448,44 @@ test("loader 2.0 lifecycle registers, authenticates routes and disposes services
   );
   assert.equal(status.running, true);
   assert.equal(status.bot, "stopped");
-  for (const fn of cleanups) fn();
+  const closing = cleanups.map(fn => fn());
+  assert(closing.some(result => result instanceof Promise));
+  await Promise.all(closing);
   assert.equal(routes.size, 0);
   assert.equal(watched, null);
+});
+
+test("service shutdown releases the gateway while a config command waits for its write", { timeout: 10000 }, async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "synapse-config-close-"));
+  const profile = path.join(home, "profiles", "test");
+  await mkdir(profile, { recursive: true });
+  const config = defaultsFor(template.fields);
+  config.modules.chat.groups = [123];
+  config.modules.chat.admins = [1];
+  const entered = Promise.withResolvers();
+  const queuedWrite = Promise.withResolvers();
+  const service = await createService({
+    baseUrl: pathToFileURL(profile + path.sep).href,
+    dshLoader: { services: { get: () => undefined } },
+  }, config, () => {}, (_value, _source, _previous, signal) => {
+    entered.resolve(signal);
+    return queuedWrite.promise;
+  });
+  try {
+    const { gateway } = service;
+    const request = fetch(`${gateway.url}/v1/activity/command`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${gateway.token}` },
+      body: JSON.stringify({ groupId: 123, userId: 1, line: "/synapse probability on" }),
+    });
+    const signal = await Promise.race([entered.promise, request.then(async res => { throw new Error(await res.text()); })]);
+    await service.close();
+    assert.equal(signal.aborted, true);
+    await request.catch(() => {});
+  } finally {
+    queuedWrite.resolve();
+    await service.close();
+    assert.equal(path.dirname(home), path.resolve(os.tmpdir()));
+    await rm(home, { recursive: true, force: true });
+  }
 });

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type { HostAPI } from "@dsh-plugin/dsh-loader";
 import type {
   ConfigSource,
@@ -38,6 +39,7 @@ interface Resident {
   scope: any;
   turn?: Turn;
   seeded: boolean;
+  closing?: Promise<void>;
 }
 
 function isUnrestorableHistory(error, id?: string): boolean {
@@ -174,13 +176,13 @@ export class Harness {
       const agent = cached.handle.agent;
       const agents = this.loader.services.get("agents");
       if (
-        this.isArchived(agent.id) ||
+        cached.closing || this.isArchived(agent.id) ||
         (channel === "chat" && agents?.get && agents.get(agent.id) !== agent)
       ) {
-        this.residents.delete(sessionKey);
-        await cached.handle.dispose();
+        await this.disposeResident(sessionKey, cached);
       }
     }
+    signal.throwIfAborted();
     const resident = sessionKey
       ? (this.residents.get(sessionKey) ??
         (await this.acquire(selection, signal, sessionKey, onEvent, channel)))
@@ -408,39 +410,50 @@ export class Harness {
 
   private async acquire(selection, signal: AbortSignal, key: string, onEvent: AgentEvent, channel: Channel) {
     const binding = await this.bindings.get(key);
-    try {
-      return await this.create(selection, signal, channel, binding);
-    } catch (error) {
-      signal.throwIfAborted();
-      const archived = error.name === "SessionArchivedError" && this.isArchived(binding.id);
-      const writerHeld = error.name === "SessionAlreadyOwnedError";
-      // 初始化和扩展监听器也可能抛出同名错误。换绑前只读核对原生历史。
-      const missingOrCorrupt = isUnrestorableHistory(error, channel === "chat" ? binding.id : undefined)
-        && (channel === "review" || await this.historyUnavailable(binding.id, signal));
-      const reviewUnavailable = channel === "review" && (writerHeld || [
-        "SessionAlreadyExistsError",
-        "SessionOwnershipLostError", "SessionFormatUnsupportedError",
-        "SessionWorkspaceChangedError", "SessionPresetChangedError",
-      ].includes(error.name) || ["ENOENT", "EACCES", "EPERM"].includes(error.code));
-      if (
-        channel === "chat" && !archived && (writerHeld ||
-          (missingOrCorrupt && this.loader.services.get("agents")?.get?.(binding.id)))
-      ) {
-        throw new Error(`DSH 聊天会话正被其他写入句柄占用，释放后可继续原会话（${binding.id}）`, { cause: error });
-      }
-      if (!archived && !missingOrCorrupt && !reviewUnavailable) {
-        throw error;
-      }
+    let retryUntil: number | undefined;
+    while (true) {
+      try {
+        return await this.create(selection, signal, channel, binding);
+      } catch (error) {
+        signal.throwIfAborted();
+        const archived = error.name === "SessionArchivedError" && this.isArchived(binding.id);
+        const writerHeld = error.name === "SessionAlreadyOwnedError";
+        if (channel === "chat" && writerHeld && (error.sessionId === undefined || error.sessionId === binding.id)) {
+          retryUntil ??= performance.now() + 3000;
+          const remaining = retryUntil - performance.now();
+          if (remaining > 0) {
+            await delay(Math.min(150, remaining), undefined, { signal });
+            continue;
+          }
+        }
+        // 初始化和扩展监听器也可能抛出同名错误。换绑前只读核对原生历史。
+        const missingOrCorrupt = isUnrestorableHistory(error, channel === "chat" ? binding.id : undefined)
+          && (channel === "review" || await this.historyUnavailable(binding.id, signal));
+        const reviewUnavailable = channel === "review" && (writerHeld || [
+          "SessionAlreadyExistsError",
+          "SessionOwnershipLostError", "SessionFormatUnsupportedError",
+          "SessionWorkspaceChangedError", "SessionPresetChangedError",
+        ].includes(error.name) || ["ENOENT", "EACCES", "EPERM"].includes(error.code));
+        if (
+          channel === "chat" && !archived && (writerHeld ||
+            (missingOrCorrupt && this.loader.services.get("agents")?.get?.(binding.id)))
+        ) {
+          throw new Error(`DSH 聊天会话正被其他写入句柄占用，释放后可继续原会话（${binding.id}）`, { cause: error });
+        }
+        if (!archived && !missingOrCorrupt && !reviewUnavailable) {
+          throw error;
+        }
 
-      const next = { id: `synapse-${randomUUID()}`, bootstrap: false };
-      const replacement = await this.create(selection, signal, channel, next, key);
-      this.residents.set(key, replacement);
-      onEvent("session.replaced", {
-        previousSession: binding.id,
-        session: next.id,
-        reason: error.name,
-      });
-      return replacement;
+        const next = { id: `synapse-${randomUUID()}`, bootstrap: false };
+        const replacement = await this.create(selection, signal, channel, next, key);
+        this.residents.set(key, replacement);
+        onEvent("session.replaced", {
+          previousSession: binding.id,
+          session: next.id,
+          reason: error.name,
+        });
+        return replacement;
+      }
     }
   }
 
@@ -629,18 +642,32 @@ export class Harness {
   async reset(key: string) {
     const resident = this.residents.get(key);
     if (resident) {
-      this.residents.delete(key);
-      await resident.handle.dispose();
+      await this.disposeResident(key, resident);
     }
     await this.bindings.reset(key);
   }
+
+  private disposeResident(key: string, resident: Resident): Promise<void> {
+    return resident.closing ??= Promise.resolve().then(() => resident.handle.dispose()).finally(() => {
+      if (this.residents.get(key) === resident) { this.residents.delete(key); }
+    });
+  }
+
+  /** Bot 重启前只释放 IM 持有的写入句柄，绑定和持久化历史继续供下一轮恢复。 */
+  releaseChatSessions(): Promise<void> {
+    return this.releaseResidents("chat:");
+  }
+
   async close() {
     this.shutdown.abort();
     await Promise.allSettled(this.tasks);
+    await this.releaseResidents();
+  }
+
+  private async releaseResidents(prefix = "") {
     const closed = await Promise.allSettled(
-      [...this.residents.values()].map((r) => r.handle.dispose()),
+      [...this.residents].filter(([key]) => key.startsWith(prefix)).map(([key, resident]) => this.disposeResident(key, resident)),
     );
-    this.residents.clear();
     const errors = closed
       .filter((r) => r.status === "rejected")
       .map((r) => r.reason);

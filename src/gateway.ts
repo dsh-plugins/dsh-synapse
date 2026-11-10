@@ -371,5 +371,6 @@ export class Gateway {
       else { run.delivered = true; }
     }
     this.activity?.disconnected();
+    if (!this.closed) { await this.agent.releaseChatSessions?.().catch(this.onError); }
   }
 }

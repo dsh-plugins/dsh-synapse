@@ -137,6 +137,7 @@ export class Agent {
   }
   busy(sessionKey: string): boolean { return this.queue.busy(sessionKey); }
   whenCurrentSettled(sessionKey: string): Promise<void> { return this.queue.whenCurrentSettled(sessionKey); }
+  releaseChatSessions(): Promise<void> { return this.harness.releaseChatSessions(); }
   async close() {
     await this.queue.close();
     await this.harness.close();

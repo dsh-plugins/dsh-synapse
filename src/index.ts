@@ -17,6 +17,7 @@ import { ChatImages } from "./chat-images.js";
 import { AsyncWordCloud } from "./word-cloud.js";
 import { Reviews } from "./github.js";
 import { json, body, browserAuthorized } from "./http.js";
+import { abortable } from "./abort.js";
 import type { SynapseContext, SynapseConfig, ErrorSink } from "./types.js";
 export const name = "@dsh-plugin/dsh-synapse";
 export const inject = ["dshLoader"];
@@ -35,7 +36,7 @@ export async function createService(
   ctx: SynapseContext,
   c: SynapseConfig,
   onError: ErrorSink,
-  writer?: ActivityWriter,
+  writer?: (...args: [...Parameters<ActivityWriter>, AbortSignal]) => Promise<void>,
 ) {
   validateConfig(c);
   const paths = pathsFor(ctx);
@@ -63,17 +64,23 @@ export async function createService(
     });
   const state = new ChatState(path.join(paths.data, "chat-state.sqlite"));
   const images = new ChatImages(paths, state, config);
+  const shutdown = new AbortController();
   const activity = new ChatActivity({ state, images, cloud: new AsyncWordCloud(path.join(paths.data, "chat-state.sqlite")), config, onError,
-    busy: groupId => agent.busy(`chat:group:${groupId}`), writer });
+    busy: groupId => agent.busy(`chat:group:${groupId}`), writer: writer && ((...args) => {
+      shutdown.signal.throwIfAborted();
+      return abortable(writer(...args, shutdown.signal), shutdown.signal);
+    }) });
   const gateway = new Gateway(agent, config, onError, activity);
   const bot = new Bot(paths, config, gateway, onError),
     reviews = new Reviews(memory.db, agent, config, bot, onError);
   activity.activate = event => bot.activate(event);
   activity.available = () => bot.state === "running";
-  const close = async () => {
+  let closing: Promise<void>;
+  const close = () => closing ??= (async () => {
+    shutdown.abort(new Error("Synapse 正在关闭"));
     const results = await Promise.allSettled([
       reviews.close(),
-      bot.stop(),
+      bot.close(),
       gateway.close(),
       agent.close(),
       mcp.close(),
@@ -83,7 +90,7 @@ export async function createService(
       if (result.status === "rejected") onError(result.reason);
     await activity.close();
     memory.close();
-  };
+  })();
   try {
     await activity.recover((sessionId, messageId, batchId) => agent.harness.hasInput(sessionId, messageId, batchId));
     await gateway.start();
@@ -147,7 +154,9 @@ export async function apply(ctx: SynapseContext) {
         service = null;
         await old.close();
       }
-      service = await createService(ctx, value, onError, (activity, source, previous) => enqueue(async () => {
+      service = await createService(ctx, value, onError, (activity, source, previous, signal) => enqueue(async () => {
+        // 重配和关闭会等待旧网关退出。网关停止等待后，旧实例的命令仍可能排在配置队列里。
+        if (signal.aborted) { return; }
         const current = handle.get();
         if (JSON.stringify(current.value.activity) !== JSON.stringify(previous)) { throw new Error("群聊策略已变更，请重新执行命令"); }
         validateConfig({ ...current.value, activity });
@@ -250,7 +259,7 @@ export async function apply(ctx: SynapseContext) {
     disposed = true;
     off();
     for (const release of routes) release();
-    void enqueue(async () => {
+    return enqueue(async () => {
       await service?.close();
       service = null;
     });
