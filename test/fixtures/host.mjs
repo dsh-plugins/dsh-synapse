@@ -103,6 +103,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
             },
           },
           tools: {
+            get: (name) => tools.find(tool => tool.name === name),
             restrict: (filter) => {
               restrictions.push(filter);
               return () => restrictions.splice(restrictions.indexOf(filter), 1);

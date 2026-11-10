@@ -93,12 +93,12 @@ export class McpManager {
     } while (cursor);
     return tools;
   }
-  async available(): Promise<AvailableTool[]> {
+  async available(signal?: AbortSignal): Promise<AvailableTool[]> {
     const result: AvailableTool[] = [];
     for (const spec of this.config().mcpServers.filter((s) => s.enabled)) {
       const allowed = new Set(spec.allowedTools);
       if (!allowed.size) continue;
-      for (const tool of await this.list(spec.name))
+      for (const tool of await this.list(spec.name, signal))
         if (allowed.has(tool.name))
           result.push({
             server: spec.name,

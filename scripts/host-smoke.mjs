@@ -161,6 +161,8 @@ for (const name of [
   "dsh-working-directory",
   "dsh-system-prompt",
   "dsh-tools",
+  "dsh-skill",
+  ...(hasPresets ? [] : ["dsh-tool-skill"]),
   "dsh-tool-executor-native",
   "dsh-agent-loop",
   "dsh-user-approval",
@@ -236,6 +238,7 @@ if (hasPresets) {
   await ctx.loader.create({ name: entry("dsh-agent-preset"), config: { id: "standard", plugins: [
     { id: "persona", name: entry("dsh-persona"), config: { prefix: "标准预设系统提示词 {{model}}" } },
     { id: "instructions", name: entry("dsh-agent-instructions"), config: { maxBytes: 65536 } },
+    { id: "tool-skill", name: entry("dsh-tool-skill") },
   ] } });
   await ctx.loader.await();
 }
@@ -506,6 +509,12 @@ try {
   await Promise.all([residentRun("恢复聊天", "等待旧写入句柄关闭"), releaseWriter]);
   assert.equal(requests.at(-1).sessionId, binding.id);
   assert.match(JSON.stringify(requests.at(-1).messages), /会话释放后继续/);
+  const removeLearningSkill = ctx.skills.register({
+    name: "fixture-learning",
+    description: "验证总结子代理先阅读 SKILL",
+    source: "runtime",
+    content: "只总结已经核实的事实和步骤。",
+  });
   const delegated = [];
   const delegationLimit = config.limits.maxToolRounds;
   const offDelegated = ctx.on("subagent/start", (info) => {
@@ -522,13 +531,16 @@ try {
     ]) {
       nativeCalls.push(
         { name: `synapse_${kind}_summarize`, args: { evidence: "已经核实的事实与成功步骤" } },
+        { name: "skill", args: { name: "fixture-learning" } },
         { name: `synapse_${kind}_save`, args },
       );
       const start = requests.length;
       await residentRun("主动委派子代理总结", "总结本次任务", learningDelegations({ services: { get: name => ctx.get(name) } }, () => config, memory, skills, "chat"));
       const childRequests = requests.slice(start).filter(request => delegated.includes(request.sessionId));
       assert(childRequests.length > 0);
-      assert(childRequests.every(request => request.tools.every(tool => tool.name.startsWith(`synapse_${kind}_`))));
+      assert(childRequests.every(request => request.tools.some(tool => tool.name === "skill")));
+      assert(childRequests.every(request => request.tools.every(tool => tool.name === "skill" || tool.name.startsWith(`synapse_${kind}_`))));
+      assert(childRequests.some(request => JSON.stringify(request.messages).includes("只总结已经核实的事实和步骤。")));
       const parentRoute = routes[start];
       assert.equal(parentRoute.provider, "host-provider");
       assert.equal(parentRoute.model, "host-model");
@@ -541,6 +553,7 @@ try {
   } finally {
     config.limits.maxToolRounds = delegationLimit;
     offDelegated();
+    removeLearningSkill();
   }
   const parent = ctx.agents.get(requests.at(-1).sessionId);
   assert.equal(ctx.workingDirectory.get(parent.session), path.join(data, "workspace", "chat"));

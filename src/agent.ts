@@ -8,7 +8,8 @@ import type {
   VoiceSender,
 } from "./types.js";
 import { instructionFor } from "./files.js";
-import { Harness, type AskApproval } from "./harness.js";
+import { Harness, userInputParts, type AskApproval } from "./harness.js";
+import { abortable, turnSignal } from "./abort.js";
 import type { HostAPI } from "@dsh-plugin/dsh-loader";
 import { SessionQueue } from "./session-queue.js";
 import { learningTools } from "./native-tools.js";
@@ -50,12 +51,16 @@ export class Agent {
     Object.assign(this, { loader, config, paths, memory, skills, mcp, sendVoice, checkGroupSend });
     this.harness = new Harness(loader, config, paths, mcp);
   }
-  async context(input, channel) {
-    const query = typeof input === "string" ? input : JSON.stringify(input);
-    const memories = this.config().memory.enabled
-      ? await this.memory.search(query, channel)
+  async context(input: unknown, channel: Channel, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const query = userInputParts(input).flatMap(part =>
+      part.type === "text" && typeof part.text === "string" ? [part.text] : [],
+    ).join("\n").trim();
+    const memories = query && this.config().memory.enabled
+      ? await this.memory.search(query, channel, signal)
       : [];
-    const skills = await this.skills.retrieve(query, channel);
+    signal?.throwIfAborted();
+    const skills = query ? await abortable(this.skills.retrieve(query, channel), signal) : [];
     const c = this.config().memory;
     const learning = [
       c.enabled && c.learnMemory && c.memoryPrompt
@@ -87,9 +92,10 @@ export class Agent {
         if (channel === "chat" && context.route && context.route.type !== "discord" && [...this.config().modules.chat.blockedUsers, ...this.config().activity.botUsers].includes(Number(context.route.userId)) && context.submission?.source !== "system") {
           throw new Error("发言者已被 AI 忽略，本轮输入没有提交");
         }
+        const runSignal = turnSignal(this.config().limits.timeoutSec, queuedSignal);
         onEvent("run.started", { session: sessionKey });
         const system =
-          (await this.context(input, channel)) +
+          (await this.context(input, channel, runSignal)) +
           (channelInstructions
             ? "\n\n通道适配规则：\n" + channelInstructions
             : "") +
@@ -108,15 +114,15 @@ export class Agent {
             onEvent("voice.sent", { ...receipt });
             return receipt;
           } : undefined) : []),
-          ...(channel === "chat" ? await this.mcp.available() : []),
+          ...(channel === "chat" ? await this.mcp.available(runSignal) : []),
         ];
-        const instruction = await instructionFor(this.paths, channel, queuedSignal);
+        const instruction = await instructionFor(this.paths, channel, runSignal);
         const output = await this.harness.run(
           system,
           input,
           history,
           tools,
-          queuedSignal,
+          runSignal,
           onEvent,
           ask,
           sessionKey,
