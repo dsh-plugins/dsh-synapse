@@ -141,6 +141,8 @@ export class Gateway {
       }
       const sessionKey = chatSessionKey(data.session_id);
       const context = chatRunContext(sessionKey, data.context);
+      let presented: string[] | undefined;
+      if (context.route) { context.onPresented = files => { presented = files; }; }
       const muteGeneration = Number.isSafeInteger(data.context?.muteGeneration) && data.context.muteGeneration >= 0 ? data.context.muteGeneration : 0;
       if (context.route?.type === "group" && muteGeneration <= (this.mutedGenerations.get(context.route.groupId) ?? -1)) {
         this.activity?.abandon(Number(data.context?.observationId), "禁言前的旧回复已取消");
@@ -213,8 +215,8 @@ export class Gateway {
           context,
         )
         .then(
-          (output) => emit("run.completed", { output }),
-          (e) => { run.failed = true; emit("run.failed", { error: e.message }); },
+          (output) => emit("run.completed", { output, ...(presented?.length ? { presented } : {}) }),
+          (e) => { run.failed = true; emit("run.failed", { error: e.message, ...(presented?.length && !controller.signal.aborted ? { presented } : {}) }); },
         )
         .finally(() => {
           run.done = true;

@@ -125,6 +125,7 @@ export class Agent {
           instruction ? [instruction] : [],
           context.submission,
           () => voiceSent,
+          channel === "chat" && context.route ? context.onPresented : undefined,
         );
         return output;
       },

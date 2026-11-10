@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { once } from "node:events";
@@ -81,7 +81,12 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
   const http = createServer(async (req, res) => {
     let body = "";
     for await (const part of req) body += part;
-    requests.push({ url: req.url, body: body ? JSON.parse(body) : {} });
+    const payload = body ? JSON.parse(body) : {};
+    requests.push({ url: req.url, body: payload });
+    if (req.url === "/upload_group_file" && payload.name === "待取消.txt") {
+      await once(res, "close");
+      return;
+    }
     if (req.url.startsWith("/speech/v1/text-to-speech/")) {
       assert.equal(req.headers["xi-api-key"], c.speech.apiKey);
       res.writeHead(200, { "Content-Type": "audio/mpeg" }); res.end(voiceAudio); return;
@@ -96,7 +101,9 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
             ? { user_id: 42, nickname: "testbot" }
             : req.url === "/get_group_info"
               ? { group_name: "铁砧工艺交流反馈☕", group_all_shut: 0 }
-              : req.url === "/get_group_member_info"
+              : req.url?.startsWith("/upload_")
+                ? null
+                : req.url === "/get_group_member_info"
                 ? { role: "member", shut_up_timestamp: 0 }
               : { message_id: 77 },
       }),
@@ -125,8 +132,31 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     }
     return originalFetch(input, init);
   });
-  const host = hostFixture(async ({ message, tools, signal }) => {
+  const presentedPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lKcAAAAASUVORK5CYII=", "base64");
+  const presentedVideo = Buffer.from("000000186674797069736f6d0000020069736f6d6d703431", "hex");
+  const host = hostFixture(async ({ message, tools, signal, session, turn }) => {
     const input = message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
+    if (input.includes("cancel pending attachments")) {
+      const first = path.join(session.header.cwd, "待取消.txt");
+      await writeFile(first, "待取消");
+      session.append("deliverables/presented", { turn, callId: "cancel", files: [{ path: first }, { path: "group/演示.mp4" }] });
+      return "";
+    }
+    if (input.includes("present fixture files")) {
+      const folder = input.includes("present fixture files private") ? "private" : "group";
+      const cwd = path.join(session.header.cwd, folder);
+      await mkdir(cwd, { recursive: true });
+      await writeFile(path.join(cwd, "交付.txt"), "交付正文");
+      await writeFile(path.join(cwd, "预览"), presentedPng);
+      await writeFile(path.join(cwd, "演示.mp4"), presentedVideo);
+      session.append("deliverables/presented", { turn, callId: "docs", files: [
+        { path: path.join(folder, "交付.txt") },
+        ...(folder === "group" ? [{ path: path.join(folder, "已移除.txt") }] : []),
+        { path: path.join(folder, "预览") },
+      ] });
+      session.append("deliverables/presented", { turn, callId: "video", files: [{ path: path.join(cwd, "交付.txt") }, { path: path.join(folder, "演示.mp4") }] });
+      return "";
+    }
     if (input.includes("voice reply")) {
       const result = await tools.find(tool => tool.name === "synapse_send_voice").execute({ text: "你好，这是一条语音回复。" }, { signal });
       assert.equal(result.sent, true);
@@ -276,6 +306,39 @@ test("full upstream bot starts, connects OneBot and executes /help and native qu
     await waitFor(() => gateway.runs.size && [...gateway.runs.values()].every(run => run.done && (!run.groupId || run.delivered)), 12000);
     assert(!requests.slice(speechStart).some(item => /未收到|执行失败|没有返回文本/.test(JSON.stringify(item.body))));
     assert.equal(requests.filter(item => item.url.startsWith("/speech/v1/text-to-speech/")).length, 2);
+    const presentStart = requests.length;
+    for (const [type, messageId] of [["group", 401], ["private", 402]]) {
+      const text = `present fixture files ${type}`;
+      socket.send(JSON.stringify({ post_type: "message", message_type: type, sub_type: "friend",
+        ...(type === "group" ? { group_id: 123 } : {}), user_id: 1, self_id: 42, message_id: messageId,
+        raw_message: text, message: [{ type: "text", data: { text } }], sender: { user_id: 1, nickname: "tester" },
+      }));
+    }
+    await waitFor(() => requests.slice(presentStart).filter(item => item.body.message?.some(segment => segment.type === "video")).length === 2, 20000);
+    await waitFor(() => requests.slice(presentStart).some(item => item.url === "/send_group_msg" && JSON.stringify(item.body).includes("有 1 个交付文件发送失败")));
+    const delivered = requests.slice(presentStart);
+    for (const [type, target, id] of [["group", "group_id", 123], ["private", "user_id", 1]]) {
+      const uploads = delivered.filter(item => item.url === `/upload_${type}_file`);
+      assert.deepEqual(uploads.map(item => item.body), [{ [target]: String(id), name: "交付.txt", file: `base64://${Buffer.from("交付正文").toString("base64")}` }]);
+      const media = delivered.filter(item => item.url === `/send_${type}_msg` && item.body.message?.some(segment => ["image", "video"].includes(segment.type)));
+      assert.deepEqual(media.map(item => item.body), [
+        { [target]: String(id), message: [{ type: "image", data: { file: `base64://${presentedPng.toString("base64")}` } }] },
+        { [target]: String(id), message: [{ type: "video", data: { file: `base64://${presentedVideo.toString("base64")}` } }] },
+      ]);
+    }
+    assert(!delivered.some(item => /未收到|执行失败/.test(JSON.stringify(item.body))));
+    const cancelStart = requests.length;
+    for (const [messageId, text] of [[403, "cancel pending attachments"], [404, "停止"]]) {
+      socket.send(JSON.stringify({ post_type: "message", message_type: "group", group_id: 123, user_id: 1,
+        self_id: 42, message_id: messageId, raw_message: text, message: [{ type: "text", data: { text } }],
+        sender: { user_id: 1, nickname: "tester" },
+      }));
+      if (messageId === 403) {
+        await waitFor(() => requests.slice(cancelStart).some(item => item.url === "/upload_group_file" && item.body.name === "待取消.txt"));
+      }
+    }
+    await waitFor(() => requests.slice(cancelStart).some(item => item.url === "/send_group_msg" && JSON.stringify(item.body).includes("已停止当前任务")));
+    assert(!requests.slice(cancelStart).some(item => item.body.message?.some(segment => segment.type === "video")));
     assert.deepEqual(errors, []);
   } catch (e) {
     const log = await readFile(

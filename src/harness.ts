@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 import type { HostAPI } from "@dsh-plugin/dsh-loader";
 import type {
   ConfigSource,
@@ -73,6 +74,7 @@ export class Harness {
     instructions: InstructionFile[] = [],
     submission?: NativeSubmission,
     externalReply?: () => boolean,
+    onPresented?: (files: string[]) => void,
   ) {
     const task = this.execute(
       system,
@@ -88,6 +90,7 @@ export class Harness {
       instructions,
       submission,
       externalReply,
+      onPresented,
     );
     this.tasks.add(task);
     void task.finally(() => this.tasks.delete(task)).catch(() => {});
@@ -144,6 +147,7 @@ export class Harness {
     instructions: InstructionFile[] = [],
     submission?: NativeSubmission,
     externalReply?: () => boolean,
+    onPresented?: (files: string[]) => void,
   ): Promise<string> {
     const config = this.config();
     const signal = AbortSignal.any([
@@ -200,6 +204,11 @@ export class Harness {
     signal.addEventListener("abort", abort, { once: true });
     let confirmation: Promise<void>;
     let seenInput = false;
+    let openTurn: number | undefined;
+    let ownsTurn = false;
+    let otherInput = false;
+    const turnFiles = new Set<string>();
+    const presented = new Set<string>();
     let message: any;
     const confirm = () => {
       if (!submission || !seenInput || confirmation) { return; }
@@ -293,11 +302,36 @@ export class Harness {
         content: submittedContent,
         source: { kind: "dsh-synapse", ...(submission ? { batchId: submission.batchId, origin: submission.source || "user" } : {}) },
       });
-      if (submission) {
-        submission.prepared(handle.agent.id, message.id);
+      submission?.prepared(handle.agent.id, message.id);
+      if (submission || onPresented) {
         releases.push(scope.on("session/event", (session, event) => {
-          if (session.id === handle.agent.id && event.type === "user/message" && event.data?.id === message.id) {
-            seenInput = true; confirm();
+          if (session.id !== handle.agent.id) { return; }
+          if (event.type === "turn/start") {
+            openTurn = event.data.turn;
+            ownsTurn = false;
+            otherInput = false;
+            turnFiles.clear();
+          } else if (event.type === "turn/end") {
+            if (ownsTurn && !otherInput && event.data?.turn === openTurn) {
+              for (const file of turnFiles) { presented.add(file); }
+            }
+            openTurn = undefined;
+            ownsTurn = false;
+          } else if (event.type === "user/message" && event.data?.id === message.id) {
+            seenInput = true;
+            ownsTurn = openTurn !== undefined;
+            confirm();
+          } else if (event.type === "user/message") {
+            const kind = event.data?.source?.kind;
+            otherInput ||= !kind || kind === "user";
+          } else if (onPresented && ownsTurn && !otherInput && event.type === "deliverables/presented" && event.data?.turn === openTurn && Array.isArray(event.data.files)) {
+            const cwd = session.header.cwd;
+            for (const file of event.data.files) {
+              if (typeof file?.path !== "string" || !file.path.trim()) { continue; }
+              // 较早的 DSH 会记录工具参数中的相对路径，目录以交付时为准。
+              if (isAbsolute(file.path)) { turnFiles.add(resolve(file.path)); }
+              else if (typeof cwd === "string" && isAbsolute(cwd)) { turnFiles.add(resolve(cwd, file.path)); }
+            }
           }
         }));
       }
@@ -311,8 +345,9 @@ export class Harness {
         await confirmation;
       }
       signal.throwIfAborted();
+      if (presented.size) { onPresented?.([...presented]); }
       if (turn.error) throw turn.error;
-      if (!turn.output && !externalReply?.()) {
+      if (!turn.output && !presented.size && !externalReply?.()) {
         if (this.isArchived(handle.agent.id)) {
           throw new Error(`DSH 会话已归档，下一条消息将自动新建会话（${handle.agent.id}）`);
         }

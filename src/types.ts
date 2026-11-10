@@ -17,6 +17,7 @@ export interface RunContext {
   route?: ChatRoute;
   submission?: NativeSubmission;
   tools?: AvailableTool[];
+  onPresented?(files: string[]): void;
 }
 /** 原生输入的可恢复提交标识；只有持久化成功后才确认背景批次。 */
 export interface NativeSubmission {

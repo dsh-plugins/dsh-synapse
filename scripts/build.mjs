@@ -6,6 +6,7 @@ import path from "node:path";
 import { activityAdapter } from "./activity-adapter.mjs";
 import { speechAdapter } from "./speech-adapter.mjs";
 import { muteAdapter } from "./mute-adapter.mjs";
+import { deliverablesAdapter } from "./deliverables-adapter.mjs";
 const require = createRequire(import.meta.url);
 const tsdownCli = path.join(
   path.dirname(require.resolve("tsdown/package.json")),
@@ -92,8 +93,11 @@ await build({
             replace("  private operationQueue: (() => void)[] = [];", "  private readonly synapseSendQueue: QQSendQueue;");
             replace("  private lastOperationHandle = -1;\n", "");
             replace("    setInterval(() => this.handlerOperationQueue(this), 2000);", `    this.synapseSendQueue = new QQSendQueue({
-      request: async (action, payload, signal) => {
-        const response = await this.axiosInstance.post('/' + action, payload, { signal });
+      request: async (action, payload, signal, deliverable) => {
+        const response = await this.axiosInstance.post('/' + action, payload, { signal, ...(deliverable ? { timeout: 120000 } : {}) });
+        if (deliverable && (response.data?.status === 'failed' || String(response.data?.retcode) !== '0')) {
+          throw new Error('OneBot 未确认交付发送成功：' + action);
+        }
         if (response.data?.retcode && response.data.retcode !== 0) {
           throw new Error('OneBot 发送失败：' + (response.data.wording || response.data.message || response.data.retcode));
         }
@@ -375,6 +379,7 @@ await build({
           contents = activityAdapter(contents, file, vendor);
           contents = speechAdapter(contents, file, vendor);
           contents = muteAdapter(contents, file, vendor);
+          contents = deliverablesAdapter(contents, file, vendor);
           return { contents, loader: "ts" };
         });
       },

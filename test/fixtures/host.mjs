@@ -80,6 +80,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
       restrictions = [],
       selected = [];
     let committedInjections = 0;
+    let lastTurn = events.findLast(event => event.type === "turn/start")?.data.turn ?? 0;
     let runtimeContext = events.findLast(event => event.type === "user/message" && event.data.source?.kind === "runtime-context")?.data.content[0]?.text ?? "";
     let controller = new AbortController(),
       task = Promise.resolve();
@@ -143,12 +144,15 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
       followup: (message) => {
         controller = new AbortController();
         task = (async () => {
+          let turn;
           try {
             conversation.push(message);
             const admission = await listeners.get("agent/pre-step")?.({ agent }, async () => ({
               kind: archived.has(id) ? "reject" : "enter",
             }));
             if (admission?.kind === "reject") { return; }
+            turn = ++lastTurn;
+            agent.session.append("turn/start", { turn });
             for (const context of injected.slice(committedInjections)) { agent.session.append("user/message", context); }
             committedInjections = injected.length;
             agent.session.append("user/message", message);
@@ -170,6 +174,8 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
               variables,
               restrictions,
               signal: controller.signal,
+              session: agent.session,
+              turn,
               emit,
               approve: (req) =>
                 listeners.get("approval/request")?.(
@@ -194,6 +200,8 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
           } catch (error) {
             failures.set(id, error);
             emit("agent/error", { error });
+          } finally {
+            if (turn !== undefined) { agent.session.append("turn/end", { turn }); }
           }
         })();
       },

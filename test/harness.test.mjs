@@ -13,6 +13,34 @@ async function harnessPaths() {
   return { profile, data: path.join(profile, "data") };
 }
 
+test("only successful deliveries from the IM input turn are collected", async () => {
+  const c = defaultsFor(template.fields);
+  const paths = await harnessPaths();
+  const host = hostFixture(async ({ message, session, turn }) => {
+    const input = message.content[0].text;
+    if (input === "plain") { return "plain"; }
+    session.append("user/message", { source: { kind: "time-context" } });
+    session.append("deliverables/presented", { turn: turn - 1, files: [{ path: "previous.txt" }] });
+    session.append("deliverables/presented", { turn, files: [{ path: "report.txt" }] });
+    if (input === "mixed") {
+      session.append("user/message", { id: "web-message", source: { kind: "user" } });
+      return "mixed";
+    }
+    return "";
+  });
+  const harness = new Harness(host.loader, () => c, paths, {});
+  const collected = [];
+  const run = input => harness.run("SOUL", input, [], [], undefined, undefined, undefined, "chat:user:1", "chat", undefined, [], undefined, undefined, files => collected.push(files));
+  try {
+    assert.equal(await run("delivery"), "");
+    assert.equal(await run("mixed"), "mixed");
+    assert.equal(await run("plain"), "plain");
+    assert.deepEqual(collected, [[path.join(paths.profile, "workspace", "chat", "report.txt")]]);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("native runs inherit current host selection, import attachments and dispose on cancellation", async () => {
   const c = defaultsFor(template.fields);
   const host = hostFixture(async ({ message, signal }) => {
