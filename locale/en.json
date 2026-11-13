@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Synapse bridge",
+    "description": "Bridges QQ and Discord chats, reviews GitHub pull requests and issues, and keeps durable memory and skills through persistent DSH sessions."
+  }
+}

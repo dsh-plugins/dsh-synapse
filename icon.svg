@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" role="img" aria-label="Synapse">
+  <path d="M10.5 11.5 15 15.2" fill="none" stroke="#176b5b" stroke-width="2.6" stroke-linecap="round" stroke-opacity="0.5"/>
+  <path d="M25.5 11.5 21 15.2" fill="none" stroke="#176b5b" stroke-width="2.6" stroke-linecap="round" stroke-opacity="0.5"/>
+  <path d="M21 20.8l2.4 4.6" fill="none" stroke="#db6b2c" stroke-width="2.6" stroke-linecap="round"/>
+  <circle cx="18" cy="18" r="4.4" fill="#176b5b"/>
+  <circle cx="8" cy="8.5" r="2.9" fill="#176b5b" fill-opacity="0.5"/>
+  <circle cx="28" cy="8.5" r="2.9" fill="#176b5b" fill-opacity="0.5"/>
+  <circle cx="25" cy="28" r="3" fill="#db6b2c"/>
+</svg>

@@ -7,7 +7,9 @@
   "exports": {
     ".": "./lib/host/index.js",
     "./client": "./lib/client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
   },
   "files": [
     "src",
@@ -22,7 +24,9 @@
     "NOTICE.md",
     "scripts",
     "test",
-    "tsconfig.json"
+    "tsconfig.json",
+    "locale",
+    "icon.svg"
   ],
   "engines": {
     "node": ">=24.9.0"
