@@ -5,6 +5,7 @@
   "type": "module",
   "main": "lib/host/index.js",
   "exports": {
+    "./loader-check": "./loader-check.mjs",
     ".": "./lib/host/index.js",
     "./client": "./lib/client.js",
     "./package.json": "./package.json",
@@ -12,6 +13,7 @@
     "./icon": "./icon.svg"
   },
   "files": [
+    "loader-check.mjs",
     "src",
     "lib",
     "vendor",

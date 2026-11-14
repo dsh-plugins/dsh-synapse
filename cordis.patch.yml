@@ -1,4 +1,6 @@
 - insert:
+    - id: dsh-synapse-loader-check
+      name: '@dsh-plugin/dsh-synapse/loader-check'
     - id: dsh-synapse-profile-skills
       name: '@deepseek-ai/dsh-skill-filesystem'
       disabled: !!js "!ctx.get('profileContext')"
