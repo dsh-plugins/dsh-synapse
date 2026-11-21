@@ -6,7 +6,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, stat as fsStat } from "node:fs/promises";
 import os from "node:os";
+import { randomUUID } from "node:crypto";
 import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
+import { createPatchAPI } from "@dsh-plugin/dsh-loader/patch";
 import { template } from "../lib/host/config.js";
 import { Harness } from "../lib/host/harness.js";
 import { learningTools } from "../lib/host/native-tools.js";
@@ -269,9 +271,10 @@ ctx.tools.register({
     return { result: "宿主继承工具执行成功" };
   },
 });
+let forkController;
 const makeHarness = () =>
   new Harness(
-    { services: { get: (name) => ctx.get(name) }, llm, dsh: { agentInstructions: { renderAgentInstructions: nativeInstructions.renderAgentInstructions ?? nativeInstructions.renderWorkspaceContext } } },
+    { patch: createPatchAPI(), services: { get: (name) => name === "sessionController" && forkController ? forkController : ctx.get(name) }, llm, dsh: { agentInstructions: { renderAgentInstructions: nativeInstructions.renderAgentInstructions ?? nativeInstructions.renderWorkspaceContext } } },
     () => config,
     { data, profile: data },
     {
@@ -439,6 +442,15 @@ try {
   assert.match(JSON.stringify(requests.at(-1)), /first resident message/);
   assert.match(JSON.stringify(requests.at(-1)), /Updated persona/);
   assert.equal((await ctx.sessionPersistence.list()).length, 1);
+  // 网页先恢复同一会话后，Synapse 通过捕获的原生句柄接管，保留 JSONL 历史和权限。
+  await harness.releaseChatSessions();
+  const webOwner = await ctx.agents.resume({ resumeSessionId: requests[0].sessionId });
+  await residentRun("Updated persona", "take over the web session");
+  assert.equal(requests.at(-1).sessionId, webOwner.agent.id);
+  assert.notEqual(ctx.agents.get(webOwner.agent.id), webOwner.agent);
+  assert.match(JSON.stringify(requests.at(-1)), /first resident message/);
+  assert.equal(await permissionOf(webOwner.agent.id), "read-only");
+  await webOwner.dispose();
   const controller = new AbortController();
   const waiting = new Promise((resolve) => {
     blocked = resolve;
@@ -606,6 +618,44 @@ try {
     const review = await new SessionBindings(data).get("review:foo/bar");
     const workspace = await ctx.workspaceRegistry.resolveByPath(path.join(data, "workspace", "review"));
     assert(workspace.sessionIds.includes(review.id));
+    // 使用宿主公开的 fork seed 构造器，验证真实 JSONL 分叉和原生句柄切换。
+    const { buildForkSeed } = await load("dsh-session");
+    if (buildForkSeed) {
+      const bindings = new SessionBindings(data);
+      const old = await bindings.get("chat:group:123");
+      await harness.close();
+      const foreign = await ctx.agents.resume({ resumeSessionId: old.id });
+      const before = await readHistory(old.id);
+      harness = makeHarness();
+      forkController = {
+        async fork({ sessionId }) {
+          assert.equal(sessionId, old.id);
+          const boundary = before.findLast(event => event.type === "turn/end").seq;
+          const sessionIdNext = `session-${randomUUID()}`;
+          await ctx.agents.create({
+            sessionId: sessionIdNext,
+            seed: buildForkSeed(before, boundary),
+            inheritedEventCount: boundary + 1,
+            meta: { cwd: foreign.agent.session.header.cwd, isSeeded: true, agentPreset: "standard" },
+          });
+          return { sessionId: sessionIdNext };
+        },
+      };
+      try {
+        await residentRun("恢复聊天", "cannot take over, continue in fork");
+        const current = await bindings.get("chat:group:123");
+        assert.notEqual(current.id, old.id);
+        assert.match(current.id, /^session-/);
+        assert(ctx.workspaceRegistry.archivedSessionIds.includes(old.id));
+        assert.deepEqual(await readHistory(old.id), before);
+        assert.equal(await permissionOf(current.id), await permissionOf(old.id));
+        assert.match(JSON.stringify(requests.at(-1).messages), /归档后继续/);
+        assert.equal((await readHistory(current.id)).filter(event => event.type === "user/message" && JSON.stringify(event.data).includes("cannot take over, continue in fork")).length, 1);
+      } finally {
+        forkController = undefined;
+        await foreign.dispose();
+      }
+    }
   }
   {
     const key = "chat:user:456";
@@ -651,7 +701,9 @@ try {
       assert.equal(await harness.hasInput(batch.sessionId, batch.messageId, batch.id), true);
       const imageRequests = requests.slice(start);
       assert(!imageRequests[0].messages.flatMap(message => message.content).some(part => part.type === "image"));
-      const toolImage = imageRequests.at(-1).messages.flatMap(message => message.content).find(part => part.type === "image");
+      const toolImage = imageRequests.at(-1).messages.flatMap(message => message.content)
+        .flatMap(part => part.type === "tool-result" && Array.isArray(part.content) ? part.content : [part])
+        .find(part => part.type === "image");
       assert(toolImage, JSON.stringify(imageRequests.at(-1).messages.slice(-3)));
       assert.equal(toolImage.attachment.width, 1); assert.equal(toolImage.attachment.height, 1);
       assert((await ctx.attachments.readImage(toolImage.attachment)).data.length > 0);

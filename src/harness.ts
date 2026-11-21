@@ -14,6 +14,7 @@ import type {
 } from "./types.js";
 import type { McpManager } from "./mcp.js";
 import { SessionBindings, type SessionBinding } from "./session-bindings.js";
+import { SessionOwnership } from "./session-ownership.js";
 import { safePath, type InstructionFile } from "./files.js";
 import { abortable, turnSignal } from "./abort.js";
 
@@ -65,6 +66,7 @@ export class Harness {
   private tasks = new Set<Promise<string>>();
   private residents = new Map<string, Resident>();
   private bindings: SessionBindings;
+  private ownership: SessionOwnership;
   constructor(
     private loader: HostAPI,
     private config: ConfigSource,
@@ -72,6 +74,7 @@ export class Harness {
     private mcp: McpManager,
   ) {
     this.bindings = new SessionBindings(paths.data);
+    this.ownership = new SessionOwnership(loader);
   }
 
   run(
@@ -405,6 +408,7 @@ export class Harness {
   private async acquire(selection, signal: AbortSignal, key: string, onEvent: AgentEvent, channel: Channel) {
     const binding = await this.bindings.get(key);
     let retryUntil: number | undefined;
+    let takeoverAttempted = false;
     while (true) {
       try {
         return await this.create(selection, signal, channel, binding);
@@ -412,13 +416,27 @@ export class Harness {
         signal.throwIfAborted();
         const archived = error.name === "SessionArchivedError" && this.isArchived(binding.id);
         const writerHeld = error.name === "SessionAlreadyOwnedError";
-        if (channel === "chat" && writerHeld && (error.sessionId === undefined || error.sessionId === binding.id)) {
+        if (writerHeld && (error.sessionId === undefined || error.sessionId === binding.id)) {
           retryUntil ??= performance.now() + 3000;
+          if (!takeoverAttempted) {
+            takeoverAttempted = true;
+            try {
+              const takeover = AbortSignal.any([signal, AbortSignal.timeout(3000)]);
+              if (await this.ownership.release(binding.id, takeover)) { continue; }
+              this.loader.services.get("agents")?.get?.(binding.id)?.cancel({ kind: "user" }, { keepInbox: true });
+            } catch (releaseError) {
+              signal.throwIfAborted();
+              onEvent("session.takeover_failed", { session: binding.id, reason: releaseError.name });
+            }
+          }
           const remaining = retryUntil - performance.now();
           if (remaining > 0) {
             await delay(Math.min(150, remaining), undefined, { signal });
             continue;
           }
+          const replacement = await this.forkOccupied(selection, signal, key, binding, onEvent, channel);
+          if (replacement) { return replacement; }
+          throw new Error(`DSH ${channel === "chat" ? "聊天" : "审查"}会话正被其他写入句柄占用，宿主未提供分叉与归档服务，释放后可继续原会话（${binding.id}）`, { cause: error });
         }
         // 初始化和扩展监听器也可能抛出同名错误。换绑前只读核对原生历史。
         const missingOrCorrupt = isUnrestorableHistory(error, channel === "chat" ? binding.id : undefined)
@@ -449,6 +467,35 @@ export class Harness {
         return replacement;
       }
     }
+  }
+
+  private async forkOccupied(selection, signal: AbortSignal, key: string, binding: SessionBinding, onEvent: AgentEvent, channel: Channel): Promise<Resident | undefined> {
+    const controller = this.loader.services.get("sessionController");
+    const workspaces = this.loader.services.get("workspaceRegistry");
+    if (!controller?.fork || !workspaces?.archiveSession) { return undefined; }
+    signal.throwIfAborted();
+    // 官方 fork 负责截取已完成历史、修复开放尾部，并保留原生权限与上下文。
+    const forked = await controller.fork({ sessionId: binding.id });
+    let replacement: Resident;
+    try {
+      signal.throwIfAborted();
+      // fork 返回的 Agent 由 Controller 创建，先释放捕获的句柄再由 Synapse 恢复。
+      if (!await this.ownership.release(forked.sessionId, signal)) {
+        throw new Error("DSH 未提供分叉会话的生命周期句柄，无法接管新会话");
+      }
+      replacement = await this.create(selection, signal, channel, { id: forked.sessionId, bootstrap: false }, key);
+    } catch (error) {
+      await this.ownership.release(forked.sessionId, new AbortController().signal).catch(() => {});
+      throw error;
+    }
+    this.residents.set(key, replacement);
+    try {
+      await workspaces.archiveSession(binding.id);
+    } catch (error) {
+      throw new Error(`DSH 已切换到分叉会话，但原会话归档失败（${binding.id}）`, { cause: error });
+    }
+    onEvent("session.replaced", { previousSession: binding.id, session: forked.sessionId, reason: "SessionAlreadyOwnedError", forked: true });
+    return replacement;
   }
 
   private async create(
@@ -615,13 +662,14 @@ export class Harness {
       }
     }
     try {
-      if (replaceKey) {
-        await this.bindings.replace(replaceKey, id, signal);
-      }
+      signal.throwIfAborted();
       // 工作区注册表用原始目录验证归属，旧聊天会话可在原工作区继续使用。
       if (workspaces && (channel === "review" || resident.handle.agent.session.header.cwd === cwd)) {
         const workspace = await workspaces.create(cwd);
         await workspace.attachSession(resident.handle.agent.id);
+      }
+      if (replaceKey) {
+        await this.bindings.replace(replaceKey, id, signal);
       }
     } catch (error) {
       try {
@@ -655,7 +703,8 @@ export class Harness {
   async close() {
     this.shutdown.abort();
     await Promise.allSettled(this.tasks);
-    await this.releaseResidents();
+    try { await this.releaseResidents(); }
+    finally { this.ownership.close(); }
   }
 
   private async releaseResidents(prefix = "") {

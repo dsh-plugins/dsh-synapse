@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { randomUUID } from "node:crypto";
 import { defaultsFor } from "@dsh-plugin/dsh-loader/config";
 import { template } from "../lib/host/config.js";
 import { Harness } from "../lib/host/harness.js";
@@ -15,7 +16,7 @@ async function fixture(t, { live = false, workspaces = false, key = "chat:group:
   const config = defaultsFor(template.fields);
   const create = () => new Harness(host.loader, () => config, { data, profile: data }, {});
   let harness = create();
-  const run = (signal, onEvent, input = "hello") => harness.run("example", input, [{ role: "user", content: "旧通道上下文" }], [], signal, onEvent, undefined, key);
+  const run = (signal, onEvent, input = "hello") => harness.run("example", input, [{ role: "user", content: "旧通道上下文" }], [], signal, onEvent, undefined, key, key.startsWith("review:") ? "review" : "chat");
   t.after(async () => { await harness.close(); await rm(data, { recursive: true, force: true }); });
   await run();
   const oldId = host.created[0].agent.id;
@@ -35,6 +36,33 @@ async function fixture(t, { live = false, workspaces = false, key = "chat:group:
     } : get(name);
   };
   return { host, oldId, run, reload, agents, failHistory, binding: () => new SessionBindings(data).get(key) };
+}
+
+async function occupiedFixture(t, options = {}, afterFork) {
+  const f = await fixture(t, { ...options, workspaces: true });
+  const owner = await f.agents.resume({ resumeSessionId: f.oldId });
+  t.after(() => owner.dispose());
+  // 模拟在插件启动前就已打开的网页句柄，当前实例没有其释放能力。
+  await f.reload();
+  const forks = [];
+  const get = f.host.loader.services.get;
+  const controller = {
+    async fork({ sessionId }) {
+      assert.equal(sessionId, f.oldId);
+      const id = `session-${randomUUID()}`;
+      f.host.stored.set(id, structuredClone(f.host.stored.get(sessionId)));
+      const child = await f.agents.create({
+        sessionId: id,
+        seed: owner.agent.session.events,
+        meta: { cwd: owner.agent.session.header.cwd, agentPreset: "standard", isSeeded: true },
+      });
+      forks.push(child);
+      await afterFork?.(child);
+      return { sessionId: id };
+    },
+  };
+  f.host.loader.services.get = name => name === "sessionController" ? controller : get(name);
+  return { ...f, forks, owner, controller };
 }
 
 test("归档会话在驻留和重载后均更换绑定，保留归档历史并登记新工作区", async (t) => {
@@ -86,28 +114,30 @@ test("消息提交期间发生归档时说明停止原因，不重放本轮且�
   assert.equal(f.host.created.length, 2);
 });
 
-test("群聊和私聊保留由宿主打开的会话，句柄释放后恢复原上下文", async (t) => {
+test("群聊和私聊接管由宿主打开的句柄，保留原会话与上下文", async (t) => {
   for (const key of ["chat:group:123", "chat:user:456"]) {
     await t.test(key, async (t) => {
       const f = await fixture(t, { key });
       const owner = await f.agents.resume({ resumeSessionId: f.oldId });
       const events = [];
       try {
-        await assert.rejects(f.run(undefined, (type) => events.push(type), "被占用时的输入"), /会话正被其他写入句柄占用/);
-        assert.equal(f.agents.get(f.oldId), owner.agent);
+        assert.equal(await f.run(undefined, (type) => events.push(type), "接管后的输入"), "done");
+        assert.notEqual(f.agents.get(f.oldId), owner.agent);
+        assert(f.host.disposed.includes(f.oldId));
         assert.equal((await f.binding()).id, f.oldId);
         assert.equal(f.host.created.length, 1);
-        assert.equal(f.host.resumed.length, 1);
+        assert.equal(f.host.resumed.length, 2);
         assert(!events.includes("session.replaced"));
       } finally {
         await owner.dispose();
       }
-      assert.equal(await f.run(undefined, undefined, "释放后的输入"), "done");
+      assert.equal(await f.run(undefined, undefined, "下一条输入"), "done");
       const restored = f.host.resumed.at(-1);
       assert.equal(restored.agent.id, f.oldId);
       assert(restored.conversation.some(message => message.content?.[0]?.text === "hello"));
-      assert(!restored.conversation.some(message => message.content?.[0]?.text === "被占用时的输入"));
+      assert.equal(restored.conversation.filter(message => message.content?.[0]?.text === "接管后的输入").length, 1);
       assert.equal(f.host.created.length, 1);
+      assert.equal(f.host.permissionWrites.length, 1);
     });
   }
 });
@@ -128,6 +158,98 @@ test("重启后第一条聊天消息等待旧写入权释放，并且只提交�
   assert.equal((await f.binding()).id, f.oldId);
   assert(!events.includes("session.replaced"));
   assert.equal(f.host.stored.get(f.oldId).filter(message => message.content?.[0]?.text === "重启后的输入").length, 1);
+});
+
+test("无法接管时 fork 历史及权限，保存新绑定后归档原会话", async (t) => {
+  for (const key of ["chat:group:123", "review:foo/bar"]) {
+    await t.test(key, async (t) => {
+      const f = await occupiedFixture(t, { key });
+      const previous = structuredClone(f.host.stored.get(f.oldId));
+      const events = [];
+      const archive = f.host.workspaceRegistry.archiveSession;
+      f.host.workspaceRegistry.archiveSession = async id => {
+        assert.notEqual((await f.binding()).id, id);
+        assert(f.agents.get((await f.binding()).id));
+        await archive(id);
+      };
+      assert.equal(await f.run(undefined, (type, value) => events.push({ type, value }), "分叉后输入"), "done");
+      const child = f.forks[0];
+      const binding = await f.binding();
+      assert.deepEqual(binding, { id: child.agent.id, bootstrap: false });
+      assert.notEqual(f.agents.get(binding.id), child.agent);
+      assert(f.host.disposed.includes(child.agent.id));
+      assert.deepEqual(f.host.stored.get(f.oldId), previous);
+      assert(f.host.workspaceRegistry.archivedSessionIds.includes(f.oldId));
+      assert.equal(f.host.permissionWrites.length, 1);
+      const resumed = f.host.resumed.at(-1);
+      assert(resumed.agent.session.events.some(e => e.type === "permission/preset" && e.data.preset === "read-only"));
+      assert(resumed.conversation.some(message => message.content?.[0]?.text === "hello"));
+      assert.equal(resumed.conversation.filter(message => message.content?.[0]?.text === "分叉后输入").length, 1);
+      assert.equal(resumed.conversation.filter(message => message.content === "旧通道上下文").length,
+        previous.filter(message => message.content === "旧通道上下文").length);
+      assert.equal(events.find(e => e.type === "session.replaced").value.forked, true);
+      await f.reload();
+      assert.equal(await f.run(), "done");
+      assert.equal(f.host.resumed.at(-1).agent.id, child.agent.id);
+      assert.equal(f.forks.length, 1);
+    });
+  }
+});
+
+test("fork 或新会话恢复失败时保留原绑定，不归档原会话", async (t) => {
+  for (const failure of ["fork", "resume", "workspace"]) {
+    await t.test(failure, async (t) => {
+      const f = await occupiedFixture(t);
+      if (failure === "fork") {
+        f.controller.fork = async () => { throw new Error("fork 失败"); };
+      } else if (failure === "resume") {
+        f.agents.resume = async () => { throw new Error("resume 失败"); };
+      } else {
+        f.host.workspaceRegistry.create = async () => { throw new Error("workspace 失败"); };
+      }
+      await assert.rejects(f.run(), new RegExp(`${failure} 失败`));
+      assert.equal((await f.binding()).id, f.oldId);
+      assert(!f.host.workspaceRegistry.archivedSessionIds.includes(f.oldId));
+      assert(f.forks.every(child => !f.agents.get(child.agent.id)));
+    });
+  }
+});
+
+test("已捕获的句柄释放失败时仍通过 fork 接续，不吞掉本条消息", async (t) => {
+  const f = await occupiedFixture(t);
+  await f.owner.dispose();
+  const owner = await f.agents.resume({ resumeSessionId: f.oldId });
+  const dispose = owner.dispose;
+  owner.dispose = async () => { throw new Error("原句柄拒绝释放"); };
+  t.after(dispose);
+  const events = [];
+  assert.equal(await f.run(undefined, type => events.push(type), "接管失败后的输入"), "done");
+  assert(events.includes("session.takeover_failed"));
+  assert.equal(f.forks.length, 1);
+  assert(f.host.workspaceRegistry.archivedSessionIds.includes(f.oldId));
+  assert.equal(f.host.stored.get((await f.binding()).id).filter(message => message.content?.[0]?.text === "接管失败后的输入").length, 1);
+});
+
+test("fork 返回时取消请求仍释放新句柄，保留原绑定和未归档状态", async (t) => {
+  const controller = new AbortController();
+  const f = await occupiedFixture(t, {}, () => controller.abort());
+  await assert.rejects(f.run(controller.signal), /abort/i);
+  assert.equal(f.forks.length, 1);
+  assert(!f.agents.get(f.forks[0].agent.id));
+  assert.equal((await f.binding()).id, f.oldId);
+  assert(!f.host.workspaceRegistry.archivedSessionIds.includes(f.oldId));
+});
+
+test("原会话归档失败时说明已切换，新句柄仍可继续处理并正常关闭", async (t) => {
+  const f = await occupiedFixture(t);
+  f.host.workspaceRegistry.archiveSession = async () => { throw new Error("归档服务暂不可用"); };
+  await assert.rejects(f.run(), /已切换到分叉会话.*原会话归档失败/);
+  const id = (await f.binding()).id;
+  assert.equal(id, f.forks[0].agent.id);
+  assert(f.agents.get(id));
+  assert.equal(await f.run(), "done");
+  await f.reload();
+  assert(!f.agents.get(id));
 });
 
 test("缓存代理已释放时，从持久化的同一 ID 恢复", async (t) => {

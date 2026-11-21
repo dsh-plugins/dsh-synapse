@@ -36,6 +36,7 @@ When upgrading from an earlier version, the plugin moves your existing settings 
 ## Daily Use & Permissions
 
 - **Conversations**: Each QQ group and its bridged Discord channel share one ongoing conversation while preserving each speaker's identity. QQ private chats are separate per user, and GitHub reviews are separate per repository.
+- **Busy sessions**: If a session is held by the DSH web app or another entry point, Synapse first tries to release that owner and continue the same conversation. If it cannot, it forks from the latest completed turn, keeps the history and permissions, and archives the original after switching successfully.
 - **Chat Commands**:
   - Send `stop` or `停止` to cancel the current reply and move to the next queued message.
   - Send `reset`, `新对话`, or `清除上下文` to clear the current context and start a fresh conversation while keeping long-term memory.

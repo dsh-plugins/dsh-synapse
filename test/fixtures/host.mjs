@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createPatchAPI } from "@dsh-plugin/dsh-loader/patch";
 
 // Native lifecycle contract fixture; durable history survives owner disposal.
 export function hostFixture(execute = async () => "done", { legacySubagents = false, workspaces = false } = {}) {
@@ -67,7 +68,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
     }
     const conversation = stored.get(id) ?? [];
     stored.set(id, conversation);
-    const events = logs.get(id) ?? [];
+    const events = logs.get(id) ?? structuredClone(options.seed ?? []);
     logs.set(id, events);
     const header = headers.get(id) ?? { id, ...options.meta };
     headers.set(id, header);
@@ -277,6 +278,7 @@ export function hostFixture(execute = async () => "done", { legacySubagents = fa
     } : { startActivation }),
   };
   const loader = {
+    patch: createPatchAPI(),
     dsh: { agentInstructions: { renderAgentInstructions: files => ({ text: files.map(file => `${file.displayPath}\n${file.content}`).join("\n") }) } },
     llm: {
       createUserMessage: (input) => ({

@@ -65,7 +65,7 @@ export class SessionBindings {
       if (
         value.key !== key ||
         typeof value.id !== "string" ||
-        !/^synapse-[a-f0-9-]+$/.test(value.id)
+        !/^(?:synapse|session)-[a-f0-9-]+$/.test(value.id)
       )
         throw new Error("会话绑定文件无效");
       return { id: value.id, bootstrap: value.bootstrap !== false };
