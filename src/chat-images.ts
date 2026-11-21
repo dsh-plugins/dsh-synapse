@@ -26,13 +26,23 @@ function segments(message: unknown): any[] {
   return result;
 }
 
+function quoteNode(node: any) {
+  const data = node?.type === "node" ? node.data ?? {} : node ?? {};
+  const message = data.message;
+  return {
+    name: String(data.sender?.card || data.sender?.nickname || data.card || data.nickname || data.name || "未知").replace(/\s+/g, " "),
+    userId: String(data.sender?.user_id ?? data.user_id ?? data.uin ?? "未知"),
+    content: (Array.isArray(message) || typeof message === "string") && message.length ? message : data.content,
+  };
+}
+
 /** 从原始 QQ 正文提取词频输入与附件引用；引用他人的正文不参与活跃或词频。 */
 export function groupContent(message: unknown, selfId: string) {
   const images: ImageReference[] = [];
   const raw: string[] = [];
-  const body: string[] = [];
   let ordinaryImage = false, count = 0;
   const visit = (input: unknown, depth = 0) => {
+    const body: string[] = [];
     for (const segment of segments(input)) {
       if (++count > 500 || depth > 3) { break; }
       const data = segment?.data ?? {};
@@ -51,18 +61,20 @@ export function groupContent(message: unknown, selfId: string) {
       } else if (segment?.type === "at" && String(data.qq) !== selfId) {
         body.push(`@${String(data.qq)}`);
       } else if (segment?.type === "reply") {
-        body.push(`[引用消息 ${String(data.id ?? "")}]`);
+        body.push(`\n[引用消息 ${String(data.id ?? "")}]\n`);
       } else if (segment?.type === "node") {
-        body.push("[引用聊天记录]");
-        visit(data.content, depth + 1);
+        const node = quoteNode(segment);
+        const kind = data.quoteType === "reply" ? "引用消息" : "转发消息";
+        const content = visit(node.content, depth + 1).trim();
+        body.push(`\n[${kind}：${node.name} (${node.userId})]\n${content.split("\n").map(line => `> ${line}`).join("\n")}\n[${kind}结束]\n`);
       } else if (segment?.type === "forward") {
-        body.push(`[聊天记录 ${String(data.id ?? "")}]`);
+        body.push(`\n[转发聊天记录 ${String(data.id ?? "")}]\n`);
       }
     }
+    return body.join("");
   };
-  visit(message);
+  const text = visit(message).slice(0, 100000).trim();
   const rawText = raw.join("").slice(0, 64000).trim();
-  const text = body.join("").slice(0, 100000).trim();
   const command = /^[\/!！]/.test(rawText);
   const human = !command && (ordinaryImage || /[\p{L}\p{N}]/u.test(withoutUrls(rawText)));
   return { rawText, text, images, command, human };
@@ -180,22 +192,22 @@ export class ChatImages {
         if (++count > 500 || depth > 2) { result.push({ type: "text", data: { text: "[引用内容超过展开限制]" } }); break; }
         const data = segment?.data ?? {};
         if (segment?.type === "node") {
-          result.push({ type: "node", data: { content: await visit(data.content, depth + 1) } });
+          const node = quoteNode(segment);
+          result.push({ type: "node", data: { name: node.name, user_id: node.userId, content: await visit(node.content, depth + 1) } });
         } else if (["reply", "forward"].includes(segment?.type)) {
           const key = `${segment.type}:${String(data.id)}`;
-          if (seen.has(key) || ++requests > 20) { result.push({ type: "text", data: { text: "[重复引用或超过查询限制]" } }); continue; }
+          if (seen.has(key) || ++requests > 20) { result.push({ type: "text", data: { text: "\n[重复引用或超过查询限制]\n" } }); continue; }
           seen.add(key);
           try {
             const value = await this.api(segment.type === "reply" ? "get_msg" : "get_forward_msg", segment.type === "reply" ? { message_id: data.id } : { message_id: String(data.id) });
             const nodes = segment.type === "reply" ? [value] : value.messages || [];
-            for (const node of nodes) {
-              const content = node.message || node.content;
-              const label = `${node.sender?.card || node.sender?.nickname || "引用消息"} (${node.sender?.user_id || node.user_id || "未知"})`;
-              result.push({ type: "node", data: { content: [{ type: "text", data: { text: `[${label}] ` } }, ...await visit(content, depth + 1)] } });
+            for (const raw of nodes) {
+              const node = quoteNode(raw);
+              result.push({ type: "node", data: { name: node.name, user_id: node.userId, quoteType: segment.type, content: await visit(node.content, depth + 1) } });
             }
           } catch (cause) {
             if (this.shutdown.signal.aborted) { throw cause; }
-            result.push({ type: "text", data: { text: "[引用消息获取失败]" } });
+            result.push({ type: "text", data: { text: "\n[引用消息获取失败]\n" } });
             this.state.log({ groupId, type: "failure", reason: "QQ 引用消息展开失败", details: { action: segment.type === "reply" ? "get_msg" : "get_forward_msg" }, time: this.now() });
           }
         } else { result.push(segment); }

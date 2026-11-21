@@ -460,6 +460,68 @@ test("引用与聊天记录中的图片异步展开并使用本地路径，词�
   assert.equal(f.state.message(trigger.seq).rawText, "本条发言");
 });
 
+test("QQ 回复将被引用作者与本条发言分开，当前输入和背景批次格式一致", async t => {
+  const f = await fixture(t, { images: true }); await f.cache.start();
+  const server = createServer(async (req, res) => {
+    let body = ""; for await (const part of req) { body += part; }
+    assert.equal(req.url, "/get_msg"); assert.deepEqual(JSON.parse(body), { message_id: 17 });
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ retcode: 0, data: { sender: { user_id: 987820727, nickname: "XeKr" }, message: [{ type: "text", data: { text: "这是赛马娘吗" } }] } }));
+  }); server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => new Promise(resolve => server.close(resolve))); f.c.connection.httpUrl = `http://127.0.0.1:${server.address().port}`;
+  const message = [ { type: "reply", data: { id: 17 } }, { type: "text", data: { text: "没戳" } } ];
+  const expected = "[引用消息：XeKr (987820727)]\n> 这是赛马娘吗\n[引用消息结束]\n没戳";
+  const observation = await f.activity.observe(event(2033538450, "", "123", "1504287869", { name: "米鱼Rice", time: 1795265315000, message }));
+  const next = await f.activity.observe(event(2, "继续讨论", "123", "1", { mentioned: true }));
+  const backgroundRun = await f.activity.submission("123", next.seq);
+  assert.deepEqual(JSON.parse(backgroundRun.submission.background), [{ messageId: "2033538450", sender: "1504287869", name: "米鱼Rice", time: 1795265315000, text: expected }]);
+  assert.equal(backgroundRun.submission.read().background, backgroundRun.submission.background);
+  assert.equal(f.state.message(observation.seq).rawText, "没戳");
+  backgroundRun.submission.committed();
+
+  const current = await f.activity.observe(event(3, "", "123", "1504287869", { name: "米鱼Rice", mentioned: true, message }));
+  const currentRun = await f.activity.submission("123", current.seq);
+  assert.equal(currentRun.input, `米鱼Rice (1504287869): ${expected}`);
+  assert.equal(currentRun.submission.read().input, currentRun.input);
+});
+
+test("转发兼容新旧节点格式并保留作者，多行和嵌套引用不会混入当前作者正文", async t => {
+  const f = await fixture(t, { images: true }); await f.cache.start();
+  const text = value => ({ type: "text", data: { text: value } });
+  const server = createServer(async (req, res) => {
+    let body = ""; for await (const part of req) { body += part; }
+    res.setHeader("Content-Type", "application/json");
+    const result = req.url === "/get_msg"
+      ? { sender: { user_id: 5, card: "群名片", nickname: "昵称" }, message: [text("第一行\n第二行")] }
+      : { messages: [
+        { sender: { nickname: "旧节点", user_id: 6 }, content: [text("旧正文")] },
+        { type: "node", data: { nickname: "新节点", user_id: 7, message: [], content: [{ type: "reply", data: { id: 17 } }, text("转发内的回复")] } },
+      ] };
+    res.end(JSON.stringify({ retcode: 0, data: result }));
+  }); server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => new Promise(resolve => server.close(resolve))); f.c.connection.httpUrl = `http://127.0.0.1:${server.address().port}`;
+  const message = [text("前文"), { type: "forward", data: { id: "18" } }, { type: "node", data: { name: "内嵌作者", uin: "8", content: [text("内嵌正文")] } }, text("后文")];
+  const trigger = await f.activity.observe(event(1, "", "123", "1", { mentioned: true, message }));
+  const run = await f.activity.submission("123", trigger.seq);
+  assert.ok(run.input.includes("前文\n[转发消息：旧节点 (6)]\n> 旧正文\n[转发消息结束]\n"));
+  assert.ok(run.input.includes("[转发消息：新节点 (7)]\n> [引用消息：群名片 (5)]\n> > 第一行\n> > 第二行\n> [引用消息结束]\n> 转发内的回复\n[转发消息结束]"));
+  assert.ok(run.input.endsWith("[转发消息：内嵌作者 (8)]\n> 内嵌正文\n[转发消息结束]\n后文"));
+  assert.equal(f.state.message(trigger.seq).rawText, "前文后文");
+  assert.equal(groupContent([{ type: "node", data: { nickname: "引用作者", user_id: 1, content: [text("只有引用文字")] } }], "42").human, false);
+  assert.equal(groupContent([text("两段"), text("普通文字")], "42").text, "两段普通文字");
+});
+
+test("引用查询失败仍与当前发言分行", async t => {
+  const f = await fixture(t, { images: true }); await f.cache.start();
+  const server = createServer((req, res) => { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ retcode: 100 })); });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => new Promise(resolve => server.close(resolve))); f.c.connection.httpUrl = `http://127.0.0.1:${server.address().port}`;
+  const trigger = await f.activity.observe(event(1, "", "123", "1", { mentioned: true, message: [{ type: "reply", data: { id: 17 } }, { type: "text", data: { text: "没戳" } }] }));
+  const run = await f.activity.submission("123", trigger.seq);
+  assert.equal(run.input, "用户1 (1): [引用消息获取失败]\n没戳");
+  assert.equal(f.state.message(trigger.seq).rawText, "没戳");
+});
+
 test("原始判定暂存与未领取的触发在重启时恢复为最多 100 条背景，关闭先取消图片请求", async t => {
   let release; const hold = new Promise(resolve => { release = resolve; });
   const f = await fixture(t);
