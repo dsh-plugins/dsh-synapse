@@ -40,7 +40,7 @@ function Lines({ values, label, placeholder, change }: { values: (number | strin
   return <Arco.Input.TextArea aria-label={label} placeholder={placeholder} value={text} onChange={next => { setText(next); change(next.split(/\r?\n/).map(item => item.trim()).filter(Boolean)); }} autoSize={{ minRows: 3, maxRows: 6 }}/>;
 }
 
-function Parameters({ value, change }: { value: ActivitySettings; change(next: ActivitySettings): void }) {
+export function ActivityParameters({ value, change }: { value: ActivitySettings; change(next: ActivitySettings): void }) {
   const set = (section: string, key: string, next: unknown) => change({ ...value, [section]: { ...value[section], [key]: next } });
   return <>
     {Object.entries(fields).map(([section, items]) => <React.Fragment key={section}>
@@ -62,7 +62,7 @@ function Parameters({ value, change }: { value: ActivitySettings; change(next: A
 }
 
 /** 策略编辑与运行日志共用配置修订号，保存时进行宿主统一校验。 */
-export function ActivityPanel({ view, client }: ConfigPanelProps) {
+export function ActivityPanel({ view, client, monitorOnly = false }: ConfigPanelProps & { monitorOnly?: boolean }) {
   const request = useRequests();
   const [rows, setRows] = React.useState<any[]>([]), [logs, setLogs] = React.useState<any[]>([]);
   const [draft, setDraft] = React.useState<ActivityConfig>(), [resource, setResource] = React.useState<any>();
@@ -98,7 +98,7 @@ export function ActivityPanel({ view, client }: ConfigPanelProps) {
   };
   return <>
     <style>{MANAGER_CSS + FORM_CSS}</style>
-    <div className="synapse-manager-toolbar"><Arco.Button onClick={() => { void open(); }} disabled={request.busy}>编辑群聊策略</Arco.Button><Arco.Button onClick={() => { void refresh(); }} loading={request.busy}>刷新状态</Arco.Button></div>
+    <div className="synapse-manager-toolbar">{!monitorOnly && <Arco.Button onClick={() => { void open(); }} disabled={request.busy}>编辑群聊策略</Arco.Button>}<Arco.Button onClick={() => { void refresh(); }} loading={request.busy}>刷新状态</Arco.Button></div>
     <ErrorNotice error={request.error}/>
     <p>只对已在「对话行为」中启用对话的 QQ 群生效。概率回复和空闲消息都要同时打开全局开关和本群开关。每个群最多保留最近 100 条未触发的消息作为背景，图片由模型按需读取。</p>
     <TableArea><Arco.Table rowKey="groupId" data={rows} size="small" pagination={false} columns={[
@@ -136,9 +136,9 @@ export function ActivityPanel({ view, client }: ConfigPanelProps) {
       {group ? <>
         <div className="synapse-activity-switches"><label>群概率回复 <Arco.Switch checked={group.probabilityEnabled} onChange={value => updateGroup({ probabilityEnabled: value })}/></label><label>群空闲消息 <Arco.Switch checked={group.idleEnabled} onChange={value => updateGroup({ idleEnabled: value })}/></label>
           <label>使用全局参数 <Arco.Switch checked={group.useDefaults} onChange={value => { const { probability, idle, words, blockedWords } = structuredClone(draft); updateGroup(value ? { useDefaults: true } : { useDefaults: false, probability, idle, words, blockedWords }); }}/></label></div>
-        {group.useDefaults ? <p>本群使用全局参数。关闭「使用全局参数」后，可以为本群单独设置。</p> : <Parameters key={group.groupId} value={group} change={updateGroup}/>}
+        {group.useDefaults ? <p>本群使用全局参数。关闭「使用全局参数」后，可以为本群单独设置。</p> : <ActivityParameters key={group.groupId} value={group} change={updateGroup}/>}
       </> : <>
-        <Parameters key="global" value={draft} change={next => setDraft({ ...draft, ...next })}/>
+        <ActivityParameters key="global" value={draft} change={next => setDraft({ ...draft, ...next })}/>
         <Arco.Divider orientation="left">缓存与日志</Arco.Divider><div className="synapse-activity-grid">{[["imageRetentionDays", "图片保留天数"], ["logRetentionDays", "日志保留天数"]].map(([key, label]) => <label key={key} className="synapse-activity-field">{label}<Arco.InputNumber aria-label={label} min={1} precision={0} value={draft[key]} onChange={value => setDraft({ ...draft, [key]: value })}/></label>)}</div>
         <Arco.Divider orientation="left">其他机器人 QQ 号</Arco.Divider><Lines label="其他机器人 QQ 号" placeholder="每行一个 QQ 号；自身机器人自动排除" values={draft.botUsers} change={value => setDraft({ ...draft, botUsers: value.map(Number) })}/>
         <p>AI 忽略名单在「聊天与通知功能 → 对话行为」中编辑。名单只影响 AI 输入、背景窗口、热词统计与真人活跃时间。</p>

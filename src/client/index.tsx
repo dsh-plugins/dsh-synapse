@@ -13,6 +13,7 @@ import { MemoryImportPanel } from "./memory.js";
 import { ReviewsPanel } from "./reviews.js";
 import { ActivityPanel } from "./activity.js";
 import { GithubRepositories } from "./github-repositories.js";
+import { SettingsPanel } from "./settings-panel.js";
 
 export const inject = ["dshLoaderUi"];
 
@@ -48,6 +49,7 @@ export function apply(ctx: {
   effect(fn: () => (() => void) | void): unknown;
   dshLoaderUi: Pick<DshLoaderUi, "config">;
 }) {
+  ctx.dshLoaderUi.config.registerPanel(ctx, { id: "synapse-settings", configId: "dsh-synapse", component: SettingsPanel });
   ctx.dshLoaderUi.config.registerDialog<GithubRepository[]>(ctx, {
     id: "github-repositories",
     configId: "dsh-synapse",

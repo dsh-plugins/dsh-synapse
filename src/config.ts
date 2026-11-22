@@ -37,13 +37,11 @@ const MEMORY_PROMPT = `你应主动捕捉并珍藏与用户相处中的点点滴
 记录记忆是没有成本的，可以自由的记忆任何内容。`;
 const SKILL_PROMPT = "在完成任务后，将本次已验证通过且后续可复用的操作步骤整理为 Skill。先调用 synapse_skill_list 和 synapse_skill_read 查阅现有内容，再调用 synapse_skill_save 保存；新建 Skill 使用当前通道的 auto-chat- 或 auto-review- 前缀，更新已有条目时传入读取到的 revision。写明适用场景、前置条件、操作步骤、验证方式与注意事项，避免重复创建。切勿将猜测、未验证方案、密钥或单次对话保存为 Skill，也不得借此扩大工具权限。仅在工具返回成功后才确认已保存。";
 
-export const template = defineConfig({
-  id: "dsh-synapse",
-  packageName: "@dsh-plugin/dsh-synapse",
-  title: "Synapse · 通道与记忆",
-  description:
-    "将 QQ、Discord 聊天与 GitHub 审查接入 DSH，支持本地混合记忆与 Skill 总结。",
-  fields: [
+const settingsFields: ConfigField[] = [
+    array("groupDirectory", "QQ 群目录", object("group", "群聊", [
+      { type: "text", key: "id", label: "群号", required: true, pattern: "^[1-9][0-9]*$" },
+      text("name", "群名称"),
+    ])),
     { ...flag("enabled", "启用机器人"), description: "开启后启动 QQ / Discord 机器人进程。填好下方「QQ 连接」后再开启。" },
     {
       type: "model",
@@ -155,8 +153,30 @@ export const template = defineConfig({
       ...array("mcpServers", "MCP 服务", mcpServerItem),
       hidden: true,
     },
-  ] satisfies ConfigField[],
-  panels,
+];
+
+// Operation input uses the same types and password references as the stored config.
+function operationField(field: ConfigField): ConfigField {
+  const { panel, dialog, fields, item, ...input } = field;
+  return { ...input, ...(fields && { fields: fields.map(operationField) }), ...(item && { item: operationField(item) }) };
+}
+
+export const template = defineConfig({
+  id: "dsh-synapse",
+  packageName: "@dsh-plugin/dsh-synapse",
+  title: "Synapse · 通道与记忆",
+  description: "管理 QQ、Discord、GitHub 与长期记忆。",
+  fields: ([
+    ...settingsFields,
+    // Embedded operations belong to the one detail panel, including the two
+    // already referenced in the speech and memory field groups.
+    ...panels.filter(panel => !["memory-import", "speech-api-key"].includes(panel.id))
+      .map(panel => ({ ...group(panel.title, []), panel: panel.id })),
+  ] satisfies ConfigField[]).map(field => ({ ...field, hidden: true })),
+  panels: [...panels, {
+    id: "synapse-settings", title: "插件设置", custom: true, fields: settingsFields.map(operationField),
+    operations: [{ id: "settings.save", requiresRevision: true }],
+  }],
 });
 
 export function validateConfig(c: SynapseConfig) {
@@ -169,6 +189,10 @@ export function validateConfig(c: SynapseConfig) {
     if (new Set(values).size !== values.length)
       throw new Error(`${label}不能重复`);
   };
+  unique(
+    (c.groupDirectory ?? []).map(row => row.id),
+    "QQ 群号",
+  );
   unique(
     c.mcpServers.map((s) => s.name),
     "MCP 名称",

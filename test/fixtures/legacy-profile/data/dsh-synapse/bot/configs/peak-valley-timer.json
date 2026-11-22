@@ -1,0 +1,6 @@
+{
+  "groups": [10002],
+  "mode": "peak",
+  "time": ["9:00-12:00 Mon-Fri"],
+  "cmd_valley_msg": "谷时段 ${time}"
+}

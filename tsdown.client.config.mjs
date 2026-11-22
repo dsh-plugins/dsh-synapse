@@ -24,7 +24,10 @@ export default {
   dts: false,
   sourcemap: true,
   clean: false,
-  external: [...CLIENT_EXTERNALS],
+  deps: {
+    neverBundle: CLIENT_EXTERNALS,
+    alwaysBundle: [/^dayjs(?:\/|$)/, "@dsh-plugin/dsh-loader/config"],
+  },
   inputOptions: {
     resolve: {
       conditionNames: ["browser", "import", "require", "default"],

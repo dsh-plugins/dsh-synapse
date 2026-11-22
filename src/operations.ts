@@ -7,7 +7,9 @@ import type {
 } from "@dsh-plugin/dsh-loader/config";
 import type { SynapseConfig } from "./types.js";
 import type { createService } from "./index.js";
-import { parseHermes } from "./memory.js";
+import { memoryOperations } from "./memory-management.js";
+import { lookupGroup } from "./group-directory.js";
+import { instructionOperations } from "./instruction-management.js";
 import { modulesFromFiles } from "./feature-config.js";
 import { validateConfig } from "./config.js";
 import { McpManager } from "./mcp.js";
@@ -58,6 +60,18 @@ export function registerOperations(
     return current;
   };
   const operations: Record<string, Operation> = {
+    ...instructionOperations,
+    "settings.save": async (_s, { input, resource, signal }) => {
+      if (resource?.id !== "settings" || handle.get().revision !== resource.revision)
+        throw new ConfigError("conflict", "配置已更新，请重新载入后再保存。");
+      const value = validateConfig(input as unknown as SynapseConfig);
+      signal.throwIfAborted();
+      const saved = await handle.update(value, resource.revision);
+      return { value: null, resource: { id: "settings", revision: saved.revision } };
+    },
+    "groups.lookup": async (_s, { config, input, signal }) => ({
+      value: await lookupGroup(config.value.connection, String(input.id), signal),
+    }),
     "activity.load": () => {
       const current = handle.get();
       return { value: { settings: current.value.activity as unknown as ConfigValue }, resource: { id: "chat-activity", revision: current.revision } };
@@ -82,10 +96,11 @@ export function registerOperations(
       };
       return { value: { items: s.activity.state.logs({ groupId: String(input.groupId || ""), type: String(input.type || ""), from: date(input.from), to: date(input.to), beforeId: Number(input.beforeId) || undefined }) } };
     },
-    "skills.list": async (s) => ({
+    "skills.list": async (s, { input }) => ({
       value: {
-        items: (await s.skills.list()).map((x) => ({
+        items: (await s.skills.list()).filter(x => [x.name, x.content].some(value => value.toLowerCase().includes(String(input.query).trim().toLowerCase()))).map((x) => ({
           name: x.name,
+          title: x.content.match(/^#\s+(.+)$/m)?.[1]?.trim() || x.name,
           revision: x.revision,
           inherited: x.inherited,
         })),
@@ -176,37 +191,7 @@ export function registerOperations(
       const saved = await handle.update({ mcpServers }, current.revision);
       return { value: "已删除", resource: { id: "mcp-servers", revision: saved.revision } };
     },
-    "memory.preview": (_s, { input }) => ({
-      value: {
-        items: parseHermes(String(input.markdown), String(input.channel)),
-      },
-    }),
-    "memory.import": async (s, { input, signal }) => {
-      if (!s.config().memory.enabled)
-        throw new ConfigError("validation", "请先在配置中启用长期记忆");
-      const result = await s.memory.addMany(
-        parseHermes(String(input.markdown), String(input.channel)),
-        signal,
-      );
-      return {
-        value: {
-          ...result,
-          summary: `新增 ${result.inserted} 条，重复 ${result.duplicates} 条。`,
-        },
-      };
-    },
-    "memory.search": async (s, { input, signal }) => ({
-      value: {
-        items: await s.memory.search(
-          String(input.query),
-          String(input.channel),
-          signal,
-        ),
-      },
-    }),
-    "memory.recent": (s, { input }) => ({
-      value: { items: s.memory.list(input.channel).map((row) => ({ ...row })) },
-    }),
+    ...memoryOperations,
     "reviews.list": (s) => ({
       value: {
         items: s.reviews
@@ -267,7 +252,7 @@ export function registerOperations(
         }
       };
       // MCP 草稿测试与配置修复不能被机器人启动失败阻塞。
-      return id.startsWith("mcp.") || ["activity.load", "activity.save"].includes(id) ? invoke() : withService(invoke);
+      return id.startsWith("mcp.") || ["settings.save", "groups.lookup", "activity.load", "activity.save"].includes(id) ? invoke() : withService(invoke);
     });
   }
   handle.registerOperation("status.read", () => ({ value: status() }));

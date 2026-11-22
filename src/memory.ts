@@ -6,13 +6,15 @@ import type {
 } from "./types.js";
 import Database from "better-sqlite3";
 import * as vec from "sqlite-vec";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { abortable } from "./abort.js";
 import { embeddingIdentity } from "./online-models.js";
 const channelCheck = (c) => {
   if (!["chat", "review"].includes(c)) throw new Error("记忆分类无效");
   return c;
 };
+const contentHash = (channel: string, text: string) =>
+  createHash("sha256").update(channel + "\0" + text).digest("hex");
 // Whitespace-separated Han characters let unicode61 index Chinese without an external tokenizer.
 export const tokenize = (text: string): string =>
   (text.toLowerCase().match(/[\p{Script=Han}]|[\p{L}\p{N}_]+/gu) || []).join(
@@ -74,6 +76,12 @@ export class Memory {
       CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(id INTEGER PRIMARY KEY, embedding float[512], channel TEXT partition key);
       CREATE TABLE IF NOT EXISTS memory_index(id INTEGER PRIMARY KEY CHECK(id=1),model TEXT NOT NULL,dimensions INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY, event TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, error TEXT, result TEXT, updated TEXT DEFAULT CURRENT_TIMESTAMP);`);
+    this.db.transaction(() => {
+      if (!(this.db.pragma("table_info(memories)") as { name: string }[]).some(column => column.name === "revision")) {
+        this.db.exec("ALTER TABLE memories ADD COLUMN revision TEXT NOT NULL DEFAULT ''");
+      }
+      this.db.exec("CREATE INDEX IF NOT EXISTS memories_channel_id ON memories(channel,id)");
+    }).immediate();
     // 旧库没有模型标识，其向量由固定的本地 512 维模型生成。
     this.db
       .prepare("INSERT OR IGNORE INTO memory_index VALUES(1,?,512)")
@@ -219,9 +227,7 @@ export class Memory {
         if (!item.text?.trim()) {
           continue;
         }
-        const hash = createHash("sha256")
-          .update(item.channel + "\0" + item.text)
-          .digest("hex");
+        const hash = contentHash(item.channel, item.text);
         if (
           hashes.has(hash) ||
           this.db.prepare("SELECT 1 FROM memories WHERE hash=?").get(hash)
@@ -245,9 +251,9 @@ export class Memory {
           for (const [index, item] of ready.entries()) {
             const result = this.db
               .prepare(
-                "INSERT OR IGNORE INTO memories(channel,source,text,hash) VALUES(?,?,?,?)",
+                "INSERT OR IGNORE INTO memories(channel,source,text,hash,revision) VALUES(?,?,?,?,?)",
               )
-              .run(item.channel, item.source, item.text, item.hash);
+              .run(item.channel, item.source, item.text, item.hash, randomUUID());
             if (!result.changes) {
               continue;
             }
@@ -352,6 +358,67 @@ export class Memory {
         "SELECT * FROM memories WHERE channel=? ORDER BY id DESC LIMIT ?",
       )
       .all(channel, limit) as MemoryRow[];
+  }
+
+  page(scope: string, query: string, page: number, pageSize: number) {
+    const conditions: string[] = [], args: string[] = [];
+    if (scope !== "all") {
+      channelCheck(scope);
+      conditions.push("channel=?");
+      args.push(scope);
+    }
+    if (query.trim()) {
+      conditions.push("(instr(lower(text),lower(?))>0 OR instr(lower(source),lower(?))>0 OR instr(CASE source WHEN 'agent' THEN '会话总结' WHEN 'hermes' THEN 'hermes 导入' ELSE '' END,lower(?))>0)");
+      args.push(query.trim(), query.trim(), query.trim());
+    }
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100)
+      throw new Error("记忆页码或每页条数无效");
+    const where = conditions.length ? " WHERE " + conditions.join(" AND ") : "";
+    return this.db.transaction(() => {
+      const { total } = this.db.prepare("SELECT count(*) AS total FROM memories" + where).get(...args) as { total: number };
+      const current = Math.min(page, Math.max(1, Math.ceil(total / pageSize)));
+      const items = this.db.prepare("SELECT id,channel,source,substr(text,1,220) AS summary,created FROM memories" + where + " ORDER BY id DESC LIMIT ? OFFSET ?")
+        .all(...args, pageSize, (current - 1) * pageSize) as { id: number; channel: string; source: string; summary: string; created: string }[];
+      return { items, total, page: current, pageSize };
+    })();
+  }
+  document(id: number) {
+    const row = this.db.prepare("SELECT id,channel,source,text,created,coalesce(nullif(revision,''),hash) AS revision FROM memories WHERE id=?")
+      .get(id) as Pick<MemoryRow, "id" | "channel" | "source" | "text" | "created"> & { revision: string };
+    return row;
+  }
+  private currentDocument(id: number, expected: string) {
+    const row = this.document(id);
+    if (!row || row.revision !== expected) throw Object.assign(new Error("记忆已变更或删除，请重新打开"), { status: 409 });
+    return row;
+  }
+  deleteDocument(id: number, revision: string, signal?: AbortSignal) {
+    return this.serial(async () => this.db.transaction(() => {
+      this.currentDocument(id, revision);
+      this.remove(id);
+    }).immediate(), signal);
+  }
+  updateDocument(id: number, revision: string, channel: MemoryItem["channel"], text: string, signal?: AbortSignal) {
+    channelCheck(channel);
+    if (!text.trim()) throw new Error("请填写记忆正文");
+    return this.serial(async signal => {
+      const current = this.currentDocument(id, revision);
+      if (current.channel === channel && current.text === text) return current;
+      const identity = embeddingIdentity(this.config().memory.embeddingModel);
+      const [vector] = await this.embedDocuments([text], signal);
+      await this.ensureIndex(identity, vector.length, signal);
+      this.checkModel(identity, signal);
+      return this.db.transaction(() => {
+        this.currentDocument(id, revision);
+        const hash = contentHash(channel, text);
+        if (this.db.prepare("SELECT 1 FROM memories WHERE hash=? AND id<>?").get(hash, id)) throw new Error("此分类已有相同内容的记忆");
+        this.db.prepare("UPDATE memories SET channel=?,text=?,hash=?,revision=? WHERE id=?").run(channel, text, hash, randomUUID(), id);
+        this.db.prepare("UPDATE memory_fts SET tokens=? WHERE rowid=?").run(tokenize(text), id);
+        this.db.prepare("DELETE FROM memory_vec WHERE id=?").run(BigInt(id));
+        this.db.prepare("INSERT INTO memory_vec(id,embedding,channel) VALUES(?,?,?)").run(BigInt(id), vector, channel);
+        return this.document(id);
+      }).immediate();
+    }, signal);
   }
   close() {
     this.shutdown.abort(new Error("记忆库已关闭"));

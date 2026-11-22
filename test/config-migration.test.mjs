@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
@@ -128,6 +128,57 @@ test("迁移前后生成的机器人功能文件内容一致", () => {
 test("分组结构的配置不会再次迁移", () => {
   assert.equal(migrateConfig(defaultsFor(template.fields)), undefined);
   assert.equal(migrateConfig(migrateConfig(flatConfig()).value), undefined);
+});
+
+test("旧 profile 目录可迁移、从原始备份恢复并再次生成同一配置", async t => {
+  const f = await profileFixture(t, {}, 0);
+  await cp(new URL("./fixtures/legacy-profile/", import.meta.url), f.profile, { recursive: true });
+  const config = path.join(f.directory, "config.json");
+  const original = await readFile(config);
+  const before = await readFile(path.join(f.bot, "hermes.json"));
+  const first = await registerConfig(f.ctx);
+  const snapshot = first.get();
+  first.dispose();
+  assert.equal(snapshot.revision, 10);
+  assert.deepEqual(snapshot.value.modules.chat.groups, [10001, 10002]);
+  assert.equal(snapshot.value.modules.chat.requireMention, false);
+  assert.equal(snapshot.value.modules.presentation.approvalTimeoutSec, 45);
+  assert.deepEqual(snapshot.value.modules.welcome.welcomes, [{ group: [10001, 10002], msg: "欢迎 ${at}\n请看群公告" }]);
+  assert.equal(snapshot.value.modules.peakValley.valleyReply, "谷时段 ${time}");
+  assert.deepEqual(snapshot.value.mcpServers[0].args, ["docs.mjs"]);
+  const backup = await readFile(path.join(f.profile, "data/dsh-synapse/config-before-forms.json"));
+  assert.deepEqual(backup, original);
+  await writeFile(config, backup);
+  const restored = await registerConfig(f.ctx);
+  assert.deepEqual(restored.get(), snapshot);
+  restored.dispose();
+  const stable = await registerConfig(f.ctx);
+  assert.deepEqual(stable.get(), snapshot);
+  stable.dispose();
+  assert.deepEqual(await readFile(path.join(f.bot, "hermes.json")), before);
+});
+
+test("混合布局保留已经迁移的配置及未更名字段，仅补齐平铺旧值", () => {
+  const old = defaultsFor(template.fields);
+  old.connection.userAgent = "profile-client";
+  old.speech.voiceId = "saved-voice";
+  old.modules.presentation.approvalTimeoutSec = 60;
+  old.modules.groupFeatures.command = [42];
+  old.modules.chat.approvalTimeoutSec = 10;
+  old.modules.command = { groups: [17] };
+  old.botJson = "{}";
+  old.mcpServers = flatConfig().mcpServers;
+  old.mcp = [];
+  old.sessionPermission = "read-only";
+  old.limits.sessionPermission = "workspace-write";
+  const { value } = migrateConfig(old);
+  assert.equal(value.limits.sessionPermission, "workspace-write");
+  assert.equal(value.speech.voiceId, "saved-voice");
+  assert.equal(value.connection.userAgent, "profile-client");
+  assert.equal(value.modules.presentation.approvalTimeoutSec, 60);
+  assert.deepEqual(value.modules.groupFeatures.command, [42]);
+  assert.deepEqual(value.mcpServers, old.mcpServers);
+  assert.equal(migrateConfig(value), undefined);
 });
 
 test("迁移后的功能文件与重构前构建生成的快照逐字一致", async () => {

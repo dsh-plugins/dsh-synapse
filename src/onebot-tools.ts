@@ -1,4 +1,4 @@
-import type { AvailableTool, ChatRoute, ConfigSource } from "./types.js";
+import type { AvailableTool, ChatRoute, ConfigSource, ConnectionConfig } from "./types.js";
 import { nativeTool, textArgument } from "./native-tools.js";
 
 /** 所有群发送使用 Bot 维护的同一份禁言缓存，取消仅结束当前调用的等待。 */
@@ -21,9 +21,9 @@ function endpoint(base: string, input: string): URL {
   return target;
 }
 
-async function call(config: ConfigSource, path: string, params: Record<string, unknown>, signal: AbortSignal, checkGroupSend?: GroupSendCheck) {
+export async function callOneBot(c: ConnectionConfig, path: string, params: Record<string, unknown>, signal: AbortSignal, checkGroupSend?: GroupSendCheck) {
   signal.throwIfAborted();
-  const c = config().connection, url = endpoint(c.httpUrl, path);
+  const url = endpoint(c.httpUrl, path);
   const action = url.pathname.split("/").filter(Boolean).at(-1)?.replace(/_(?:async|rate_limited)$/, "");
   const context = params.context as Record<string, unknown> | undefined;
   const operation = params.operation as Record<string, unknown> | undefined;
@@ -86,7 +86,7 @@ export function onebotTools(config: ConfigSource, route?: ChatRoute, checkGroupS
     async (args, signal) => {
       const path = textArgument(args, "path", 2048);
       if (!args.params || typeof args.params !== "object" || Array.isArray(args.params)) { throw new Error("params 必须是 JSON 参数对象"); }
-      return call(config, path, args.params as Record<string, unknown>, signal, checkGroupSend);
+      return callOneBot(config().connection, path, args.params as Record<string, unknown>, signal, checkGroupSend);
     },
   )];
   const group = route.type !== "user";
@@ -123,7 +123,7 @@ export function onebotTools(config: ConfigSource, route?: ChatRoute, checkGroupS
           params[key] = args[key];
         }
       }
-      return call(config, action, params, signal);
+      return callOneBot(config().connection, action, params, signal);
     },
   ));
   return tools;

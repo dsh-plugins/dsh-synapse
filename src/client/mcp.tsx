@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Arco, type ConfigPanelProps } from "@dsh-plugin/dsh-loader/client";
+import { Button, Input, Icon, Table } from "@dsh-plugin/dsh-ui-components";
 import type { ConfigView, ConfigValue } from "@dsh-plugin/dsh-loader/config";
 import type { McpSpec } from "../types.js";
 import { mcpServerItem } from "../feature-config.js";
@@ -9,8 +10,9 @@ import { EditorDialog, ErrorNotice, MANAGER_CSS, TableArea, useRequests } from "
 interface ToolRow { name: string; description?: string; inputSchema?: Record<string, unknown> }
 interface EditorState { base: ConfigView; server: McpSpec; originalName: string }
 
-export function McpPanel({ view, client }: ConfigPanelProps) {
+export function McpPanel({ view, client, onSaved }: ConfigPanelProps & { onSaved?(): void }) {
   const request = useRequests();
+  const [query, setQuery] = React.useState("");
   const [snapshot, setSnapshot] = React.useState(view);
   const [editor, setEditor] = React.useState<EditorState>();
   React.useEffect(() => { setSnapshot(current => view.revision > current.revision ? view : current); }, [view]);
@@ -26,19 +28,19 @@ export function McpPanel({ view, client }: ConfigPanelProps) {
     const server = name ? (latest.value.mcpServers as unknown as McpSpec[]).find(item => item.name === name) : fieldDefault(mcpServerItem) as McpSpec;
     if (server) { setEditor({ base: latest, server: structuredClone(server), originalName: name }); }
   };
-  return <>
+  const visible = rows.filter(row => [row.name, row.transport, ...row.allowedTools].some(term => term.toLowerCase().includes(query.trim().toLowerCase())));
+  return <div className="synapse-resources">
     <style>{MANAGER_CSS}</style>
-    <div className="synapse-manager-toolbar"><Arco.Button loading={request.busy} onClick={() => { void refresh(); }}>刷新</Arco.Button>
-      <Arco.Button type="primary" disabled={request.busy} onClick={() => { void edit(); }}>新增 MCP</Arco.Button></div>
+    <div className="sr-bar"><div className="sr-search"><Input type="search" aria-label="搜索 MCP 服务" placeholder="搜索服务或工具" value={query} onChange={setQuery} prefix={<Icon name="Search" size={15}/>}/></div>
+      <Button size="sm" variant="primary" disabled={request.busy} onClick={() => { void edit(); }}>新增 MCP</Button></div>
     <ErrorNotice error={request.error}/>
-    <TableArea><Arco.Table rowKey="name" data={rows} pagination={false} size="small" columns={[
-      { title: "名称", dataIndex: "name" },
-      { title: "传输", dataIndex: "transport", width: 100 },
-      { title: "状态", width: 90, render: (_value, row: McpSpec) => row.enabled ? "已启用" : "已停用" },
-      { title: "操作", width: 90, render: (_value, row: McpSpec) => <Arco.Button size="small" disabled={request.busy} onClick={() => { void edit(row.name); }}>编辑</Arco.Button> },
-    ]}/></TableArea>
-    {editor && <McpEditor {...{ view, client }} initial={editor} close={() => setEditor(undefined)} saved={() => { setEditor(undefined); void refresh(); }}/>}
-  </>;
+    <Table rowKey="name" data={visible} pagination={visible.length > 10 ? {pageSize:10,simple:true} : false} size="small" border={false} showHeader={false} tableLayoutFixed columns={[
+      { title: "名称", dataIndex: "name", render:(name: string, row: McpSpec) => <div className="sr-item"><strong>{name}</strong><small>{row.transport} · {row.allowedTools.length} 项工具允许调用</small></div> },
+      { title: "状态", width: 82, render: (_value, row: McpSpec) => row.enabled ? "已启用" : "已停用" },
+      { title: "操作", width: 70, render: (_value, row: McpSpec) => <Button size="sm" variant="text" disabled={request.busy} onClick={() => { void edit(row.name); }}>编辑</Button> },
+    ]} noDataElement={query ? "没有符合条件的服务" : "还没有 MCP 服务"}/>
+    {editor && <McpEditor {...{ view, client }} initial={editor} close={() => setEditor(undefined)} saved={() => { setEditor(undefined); void refresh(); onSaved?.(); }}/>}
+  </div>;
 }
 
 function McpEditor({ view, client, initial, close, saved }: ConfigPanelProps & { initial: EditorState; close(): void; saved(): void }) {

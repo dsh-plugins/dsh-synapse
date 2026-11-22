@@ -1,12 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import vm from "node:vm";
+import { JSDOM } from "jsdom";
 
 const require = createRequire(import.meta.url);
 
-async function factory(file) {
+async function factory(file, browser) {
   let loaded;
-  const browser = globalThis.window ?? {};
   browser.__ModuleLoader__ = { load: (module) => { loaded = module.factory; } };
   const sandbox = { window: browser, document: browser.document, navigator: browser.navigator,
     console, structuredClone, setTimeout, clearTimeout, setInterval, clearInterval, AbortController, AbortSignal,
@@ -23,11 +23,10 @@ async function factory(file) {
   return loaded;
 }
 
-export async function loadClient({ realFacade = false } = {}) {
-  const facade = realFacade
-    ? (await factory(new URL("../../node_modules/@dsh-plugin/dsh-loader/lib/client.js", import.meta.url)))(name => name === "@deepseek-ai/dsh-client-ui-primitives" ? { Menu: () => null } : require(name))
-    : { Arco: {} };
-  const plugin = (await factory(new URL("../../lib/client.js", import.meta.url)))(name => name === "@dsh-plugin/dsh-loader/client" ? facade : require(name));
+export async function loadClient() {
+  const browser = globalThis.window ?? new JSDOM("<!doctype html><body></body>").window;
+  const facade = (await factory(new URL("../../node_modules/@dsh-plugin/dsh-loader/lib/client.js", import.meta.url), browser))(name => name === "@deepseek-ai/dsh-client-ui-primitives" ? { Menu: () => null } : require(name));
+  const plugin = (await factory(new URL("../../lib/client.js", import.meta.url), browser))(name => name === "@dsh-plugin/dsh-loader/client" ? facade : require(name));
   const dialogs = [], panels = [];
   plugin.apply({ dshLoaderUi: { config: {
     registerDialog: (_owner, options) => dialogs.push(options),

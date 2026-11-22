@@ -1,10 +1,15 @@
 import type { ConfigPanel } from "@dsh-plugin/dsh-loader/config";
-import { text, flag, select, mcpServerItem, num } from "./feature-config.js";
+import { text, flag, mcpServerItem, num } from "./feature-config.js";
 import { activityField } from "./activity-config.js";
-
-const channel = () => select("channel", "记忆分类", [["chat", "聊天（QQ / Discord 共享）"], ["review", "GitHub 审查"]]);
+import { memoryManagementPanels } from "./memory-panels.js";
+import { instructionPanel } from "./instruction-panel.js";
 
 export const panels: ConfigPanel[] = [
+  instructionPanel,
+  {
+    id: "groups", title: "查询 QQ 群", custom: true, fields: [text("id", "群号")],
+    operations: [{ id: "groups.lookup", input: ["id"], readOnly: true }],
+  },
   { id: "speech-api-key", title: "获取 BreezeBlue API Key", custom: true, fields: [], operations: [] },
   {
     id: "activity", title: "群聊上下文与主动回复", custom: true,
@@ -19,9 +24,9 @@ export const panels: ConfigPanel[] = [
   },
   {
     id: "skills", title: "Skill 管理", custom: true,
-    fields: [text("selected", "已选 Skill"), text("name", "Skill 名称"), { ...text("content", "Markdown 文档", "", "textarea"), max: 200000 }, flag("confirmDelete", "确认删除")],
+    fields: [text("query", "搜索 Skill"), text("selected", "已选 Skill"), text("name", "Skill 名称"), { ...text("content", "Markdown 文档", "", "textarea"), max: 200000 }, flag("confirmDelete", "确认删除")],
     operations: [
-      { id: "skills.list", input: [], readOnly: true },
+      { id: "skills.list", input: ["query"], readOnly: true },
       { id: "skills.load", input: ["selected"], readOnly: true },
       { id: "skills.create", input: ["name", "content"] },
       { id: "skills.save", input: ["name", "content"], requiresRevision: true },
@@ -37,22 +42,7 @@ export const panels: ConfigPanel[] = [
       { id: "mcp.delete", input: ["originalName", "confirmDelete"], requiresRevision: true },
     ],
   },
-  {
-    id: "memory-import", title: "Hermes 记忆导入", custom: true,
-    fields: [channel(), { ...text("markdown", "Hermes 记忆 Markdown", "", "textarea"), max: 500000 }],
-    operations: [
-      { id: "memory.preview", input: ["markdown", "channel"], readOnly: true },
-      { id: "memory.import", input: ["markdown", "channel"] },
-    ],
-  },
-  {
-    id: "memory", title: "记忆检索",
-    fields: [channel(), text("query", "检索关键词")],
-    operations: [
-      { id: "memory.search", input: ["query", "channel"], readOnly: true, button: { label: "混合检索" }, result: [{ type: "list", path: ["items"], label: ["text"] }] },
-      { id: "memory.recent", input: ["channel"], readOnly: true, button: { label: "最近记忆" }, result: [{ type: "list", path: ["items"], label: ["text"] }] },
-    ],
-  },
+  ...memoryManagementPanels,
   {
     id: "reviews", title: "GitHub 审查任务", custom: true,
     fields: [text("id", "任务 ID")],

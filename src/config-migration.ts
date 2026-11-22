@@ -22,14 +22,15 @@ const FLAT_KEYS = [
 const PRESENTATION_KEYS = presentationFields.map((field) => field.key!);
 
 function legacy(raw: any): boolean {
-  return raw.features?.length > 0 || raw.mcp?.length > 0 ||
-    Boolean(raw.botJson && raw.botJson !== "{}") || Boolean(raw.llmUrl) || Boolean(raw.externalHermes);
+  return ["features", "mcp", "botJson", "llmUrl", "llmKey", "externalHermes", "hermesUrl", "hermesKey"]
+    .some((key) => Object.hasOwn(raw, key));
 }
 
 function flat(raw: any): boolean {
   const m = raw.modules ?? {};
   return FLAT_KEYS.some((key) => key in raw) || GROUP_FEATURES.some((id) => id in m) ||
-    PRESENTATION_KEYS.some((key) => key in (m.chat ?? {})) || "peak_msg" in (m.peakValley ?? {});
+    PRESENTATION_KEYS.some((key) => key in (m.chat ?? {})) ||
+    ["peak_msg", "valley_msg", "cmd_peak_msg", "cmd_valley_msg"].some((key) => key in (m.peakValley ?? {}));
 }
 
 /**
@@ -49,14 +50,13 @@ export function restructureConfig(raw: any): any {
   const { peak_msg, valley_msg, cmd_peak_msg, cmd_valley_msg, ...peakValley } = m.peakValley ?? {};
   // JSON 往返去掉值为 undefined 的键，loader 的校验只接受 JSON 值，缺失的字段由模板默认值补齐。
   return JSON.parse(JSON.stringify({
-    enabled: raw.enabled,
-    chatModel: raw.chatModel,
-    reviewModel: raw.reviewModel,
+    ...raw,
     connection: {
       httpUrl: raw.httpUrl, wsUrl: raw.wsUrl, httpToken: raw.httpToken, wsToken: raw.wsToken,
       chromePath: raw.chromePath, userAgent: raw.userAgent, tokenParams: raw.tokenParams, logLevel: raw.logLevel,
+      ...raw.connection,
     },
-    limits: { sessionPermission: raw.sessionPermission, timeoutSec: raw.timeoutSec, maxToolRounds: raw.maxToolRounds },
+    limits: { sessionPermission: raw.sessionPermission, timeoutSec: raw.timeoutSec, maxToolRounds: raw.maxToolRounds, ...raw.limits },
     github: {
       enabled: raw.githubEnabled,
       token: raw.githubToken,
@@ -66,29 +66,25 @@ export function restructureConfig(raw: any): any {
         : undefined,
       publishReviews: raw.publishReviews,
       maxDiffChars: raw.maxDiffChars,
+      ...raw.github,
     },
     memory: {
       enabled: raw.ragEnabled, embeddingModel: raw.embeddingModel, rerankModel: raw.rerankModel,
       recallCount: raw.recallK, contextCount: raw.memoryK, reranker: raw.reranker,
       learnMemory: raw.learnMemory, learnSkills: raw.learnSkills,
       memoryPrompt: raw.memoryPrompt, skillPrompt: raw.skillPrompt, maxItems: raw.maxMemories,
+      ...raw.memory,
     },
     modules: {
-      management: m.management,
-      groupFeatures: Object.fromEntries(GROUP_FEATURES.map((id) => [id, m[id]?.groups])),
-      bili: m.bili,
-      github: m.github,
-      welcome: m.welcome,
-      discord: m.discord,
+      ...m,
+      groupFeatures: { ...Object.fromEntries(GROUP_FEATURES.map((id) => [id, m[id]?.groups])), ...m.groupFeatures },
       chat,
-      presentation,
+      presentation: { ...presentation, ...m.presentation },
       peakValley: {
-        ...peakValley,
         peakMessage: peak_msg, valleyMessage: valley_msg, peakReply: cmd_peak_msg, valleyReply: cmd_valley_msg,
+        ...peakValley,
       },
     },
-    activity: raw.activity,
-    mcpServers: raw.mcpServers,
   }));
 }
 
@@ -96,7 +92,7 @@ export function restructureConfig(raw: any): any {
 function migrateLegacy(raw: any, c: any) {
   const base = JSON.parse(raw.botJson || "{}");
   for (const key of ["userAgent", "logLevel", "tokenParams"]) {
-    if (base[key] !== undefined) {
+    if (base[key] !== undefined && raw.connection?.[key] === undefined) {
       c.connection[key] = base[key];
     }
   }
@@ -104,7 +100,8 @@ function migrateLegacy(raw: any, c: any) {
     validateValues(template.fields, { modules: c.modules }).modules as unknown as SynapseConfig["modules"],
     (raw.features ?? []).map((f) => ({ id: f.id, value: JSON.parse(f.json || "{}") })),
   );
-  c.mcpServers = (raw.mcp ?? []).map((s) => ({
+  if (!Array.isArray(raw.mcp) || Array.isArray(raw.mcpServers)) return;
+  c.mcpServers = raw.mcp.map((s) => ({
     name: s.name,
     enabled: s.enabled ?? true,
     transport: s.transport ?? "stdio",
@@ -150,11 +147,12 @@ export function migrateConfig(raw: any): { value: SynapseConfig; legacy: boolean
   return { value: finish(migrateRepositories(c)), legacy: isLegacy };
 }
 
-async function readRaw(profile: string): Promise<{ value: any; revision: number } | undefined> {
+async function readRaw(profile: string): Promise<{ value: any; revision: number; content: string } | undefined> {
   const file = await safePath(profile, "config", "dsh-synapse", "config.json");
   try {
-    const disk = JSON.parse(await readFile(file, "utf8"));
-    return { value: disk.value ?? {}, revision: disk.revision };
+    const content = await readFile(file, "utf8");
+    const disk = JSON.parse(content);
+    return { value: disk.value, revision: disk.revision, content };
   } catch (error) {
     if (error.code === "ENOENT") {
       return undefined;
@@ -197,7 +195,7 @@ export async function registerConfig(ctx: SynapseContext) {
         migration.legacy ? "config-before-forms.json"
           : flat(snapshot.value) ? "config-before-restructure.json" : "config-before-github-repositories.json",
       );
-      await atomicWrite(backup, JSON.stringify(snapshot, null, 2));
+      await atomicWrite(backup, snapshot.content);
       await handle.update(migrated, snapshot.revision);
     }
   } catch (error) {

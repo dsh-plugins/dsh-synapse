@@ -144,6 +144,7 @@ export interface GroupFeatures {
   command: number[];
 }
 export interface SynapseConfig {
+  groupDirectory: { id: string; name: string }[];
   activity: ActivityConfig;
   enabled: boolean;
   chatModel: ConfigModelValue | null;

@@ -78,6 +78,7 @@
   },
   "devDependencies": {
     "@dsh-plugin/dsh-loader": "2.0.0-dev.41617773595",
+    "@dsh-plugin/dsh-ui-components": "0.1.0-dev.45006073943",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.10.1",
     "@types/react": "^18.3.31",

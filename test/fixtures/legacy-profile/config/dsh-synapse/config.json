@@ -1,0 +1,17 @@
+{
+  "formatVersion": 1,
+  "revision": 9,
+  "value": {
+    "enabled": false,
+    "botJson": "{\"logLevel\":\"warn\",\"userAgent\":\"legacy-fixture\"}",
+    "features": [
+      { "id": "hermes", "json": "{\"groups\":[10001],\"approvalTimeoutSec\":45}" },
+      { "id": "welcome", "json": "{\"welcomes\":[{\"group\":[10001,10002],\"msg\":[\"欢迎 ${at}\",\"请看群公告\"]}]}" }
+    ],
+    "mcp": [
+      { "name": "docs", "command": "node", "argsJson": "[\"docs.mjs\"]", "allowedTools": "read search" }
+    ],
+    "timeoutSec": 90,
+    "repositories": "example/repo\nexample/*"
+  }
+}
