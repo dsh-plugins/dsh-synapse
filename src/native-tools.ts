@@ -2,18 +2,40 @@ import type { AvailableTool, Channel, ConfigSource } from "./types.js";
 import type { Memory } from "./memory.js";
 import type { SkillStore } from "./files.js";
 
+type ToolProperty = Record<string, unknown>;
+
+function optionalProperty(schema: ToolProperty): ToolProperty {
+  if (schema.type === "string" && (schema.const === undefined || schema.const === "")
+    && (schema.enum === undefined || Array.isArray(schema.enum) && schema.enum.includes(""))) {
+    return schema;
+  }
+  const { description, ...valueSchema } = schema;
+  return {
+    ...(description === undefined ? {} : { description }),
+    oneOf: [valueSchema, { type: "string", const: "" }],
+  };
+}
+
 /** 将本地能力注册为当前 Agent 回合的原生工具，结果由模型在同一次回复中使用。 */
 export function nativeTool(
   name: string,
   description: string,
-  properties: Record<string, unknown>,
+  properties: Record<string, ToolProperty>,
   required: string[],
-  execute: AvailableTool["execute"],
+  execute: NonNullable<AvailableTool["execute"]>,
 ): AvailableTool {
+  const optional = new Set(Object.keys(properties).filter(key => !required.includes(key)));
+  const declared = Object.fromEntries(Object.entries(properties).map(([key, schema]) =>
+    [key, optional.has(key) ? optionalProperty(schema) : schema],
+  ));
   return {
     server: "synapse", rawName: name, name, description,
-    parameters: { type: "object", properties, required, additionalProperties: false },
-    execute,
+    parameters: { type: "object", properties: declared, required, additionalProperties: false },
+    execute: optional.size === 0 ? execute : (args, signal, parent) => {
+      // 只归一化自有工具的可省字段，保留其他值以接受原有校验。
+      const input = Object.fromEntries(Object.entries(args).filter(([key, value]) => value !== "" || !optional.has(key)));
+      return execute(input, signal, parent);
+    },
   };
 }
 
@@ -29,7 +51,7 @@ export function textArgument(args: Record<string, unknown>, key: string, max = 2
 /** 记忆与自动 Skill 固定在当前聊天或审查通道，写入能力跟随自总结开关。 */
 export function learningTools(config: ConfigSource, memory: Memory, skills: SkillStore, channel: Channel): AvailableTool[] {
   const c = config().memory;
-  const text = { type: "string", minLength: 1 };
+  const text = { type: "string" };
   const readable = (name: string) => !name.startsWith("auto-") || name.startsWith(`auto-${channel}-`);
   const list = async (signal: AbortSignal) => {
     signal.throwIfAborted();
@@ -66,7 +88,7 @@ export function learningTools(config: ConfigSource, memory: Memory, skills: Skil
   }
   if (c.learnSkills) {
     tools.push(nativeTool("synapse_skill_save", `创建或更新可复用的 Skill。name 须以 auto-${channel}- 开头，仅限小写字母、数字、短横线或下划线，不超过 64 字符。更新已有条目时传入读取到的 revision，新建时省略。`, {
-      name: { ...text, maxLength: 64 }, content: { ...text, maxLength: 200000 }, revision: { type: "string" },
+      name: text, content: { ...text, description: "正文，最多 200000 字符。" }, revision: text,
     }, ["name", "content"], async (args, signal) => {
       if (!config().memory.learnSkills) {
         throw new Error("Skill 写入已关闭");

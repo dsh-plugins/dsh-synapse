@@ -94,7 +94,7 @@ export function speechTools(config: ConfigSource, route?: ChatRoute, send?: Voic
   if (!config().speech.enabled || !route || !send) { return []; }
   return [nativeTool("synapse_send_voice",
     "将 text 合成为语音并直接发送到当前聊天会话。可以在适合口语表达、用户要求朗读或语音回复时主动调用。instructions 可描述语气、情绪与朗读方式，应与正文使用相同语言；省略则使用配置的风格。不要朗读密钥或无关的长篇内容，不要更改发送目标。仅在 sent=true 时确认已发送；发送成功后无需重复朗读正文，可以不再输出文字。未确认发送的请求可能已送达，切勿盲目重试。",
-    { text: { type: "string", minLength: 1, maxLength: 2000 }, instructions: { type: "string", maxLength: 2000 } }, ["text"],
+    { text: { type: "string", description: "朗读正文，最多 2000 字符。" }, instructions: { type: "string", description: "朗读风格，最多 2000 字符。" } }, ["text"],
     async (args, signal) => {
       const text = textArgument(args, "text", 4000);
       const audio = await synthesizeSpeech(config().speech, text, args.instructions as string | undefined, signal);

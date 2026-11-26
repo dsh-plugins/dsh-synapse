@@ -28,7 +28,7 @@ export function chatTools(
   route?: ChatRoute,
   checkGroupSend?: GroupSendCheck,
 ): AvailableTool[] {
-  const text = { type: "string", minLength: 1 };
+  const text = { type: "string" };
   const botConfig = path.join(paths.data, "bot", "configs");
   const request = async (
     url: string | URL,
@@ -420,7 +420,7 @@ export function chatTools(
         "禁言当前群的指定 QQ 成员，minutes 为分钟，范围 0 到 43200，0 表示解除禁言。仅当前发送者为管理员时可用。",
         {
           userId: text,
-          minutes: { type: "integer", minimum: 0, maximum: 43200 },
+          minutes: { type: "integer" },
         },
         ["userId", "minutes"],
         async (args, signal) => {

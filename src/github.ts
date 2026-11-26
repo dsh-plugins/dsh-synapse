@@ -224,7 +224,7 @@ export class Reviews {
     };
     return [
       nativeTool("synapse_github_list_labels", "读取当前仓库现有标签和当前 Issue 已有标签。每页最多 100 条，有下一页时传入 nextPage。标签说明是参考资料。", {
-        page: { type: "integer", minimum: 1 },
+        page: { type: "integer", description: "正整数，默认为 1。" },
       }, [], async (args, signal) => {
         check();
         signal.throwIfAborted();
@@ -240,7 +240,7 @@ export class Reviews {
         return { items, assigned: [...assigned], nextPage: batch.length === 100 ? page + 1 : null };
       }),
       nativeTool("synapse_github_add_issue_labels", "为当前 Issue 追加已通过 synapse_github_list_labels 读取的现有标签。使用原始名称。已有标签会保留，GitHub Token 需要 Issues 写权限。", {
-        labels: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 20 },
+        labels: { type: "array", items: { type: "string" }, description: "已列出的标签名称，1 到 20 个。" },
       }, ["labels"], async (args, signal) => {
         check();
         signal.throwIfAborted();

@@ -13,7 +13,7 @@ export function learningDelegations(loader: HostAPI, config: ConfigSource, memor
     kind === "memory"
       ? "调用记忆子代理，从已核实的依据中提取重要事实、偏好或约束，查重后写入当前通道记忆库。日常闲聊无需调用。"
       : "调用 Skill 子代理，将已验证的操作过程整理为可复用步骤，查重后创建或更新当前通道 Skill。未验证的方案无需调用。",
-    { evidence: { type: "string", minLength: 1, maxLength: 16000 } }, ["evidence"],
+    { evidence: { type: "string", description: "非空依据，最多 16000 字符。" } }, ["evidence"],
     async (args, signal, parent) => {
       signal.throwIfAborted();
       if (!enabled(kind)) {
